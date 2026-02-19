@@ -1,0 +1,9 @@
+[package]
+name = "thot"
+version = "0.1.0"
+edition = "2024"
+description = "a"
+authors = ["Saigo Ekitae <saigoekitae@gmail.com>"]
+
+[dependencies]
+clap = "4.5.59"

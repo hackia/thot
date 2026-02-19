@@ -1,0 +1,5 @@
+*.bin
+.lys/
+.idea/
+prog
+target

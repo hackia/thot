@@ -1,0 +1,7 @@
+wab             ; Purifie l'écran de SeaBIOS une bonne fois pour toutes
+per "Terminal Amentys Pret."
+
+boucle:
+    sedjem %ka  ; Attendre une touche
+    per %ka     ; Afficher la touche
+    neheh boucle; Recommencer sans effacer
