@@ -15,6 +15,11 @@ pub enum Instruction {
         destination: String,
         valeur: Expression,
     },
+    // duat "Ma phrase", adresse
+    Duat {
+        phrase: String,
+        adresse: u16,
+    },
     // jena cible (Appel de fonction / CALL)
     Jena {
         cible: String,
@@ -22,16 +27,25 @@ pub enum Instruction {
     // kheper %registre, adresse (Sauvegarder dans la RAM)
     Kheper {
         source: String,
-        adresse: u16,
+        adresse: Expression,
     },
     // ankh cible (Saute vers l'étiquette SI la comparaison précédente est égale)
     Ankh {
         cible: String,
     },
+    // isfet cible (Saute SI la comparaison précédente est DIFFERENTE)
+    Isfet {
+        cible: String,
+    },
+    Kheb {
+        destination: String,
+        valeur: Expression,
+    },
+
     // sena %registre, adresse (Charger depuis la RAM)
     Sena {
         destination: String,
-        adresse: u16,
+        adresse: Expression,
     },
     // sema %registre, valeur
     Sema {

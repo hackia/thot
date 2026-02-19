@@ -1,10 +1,30 @@
 wab
-per "Amentys est pret."
-boucle:
-    jena point
-    sedjem %ka
+; --- INITIALISATION ---
+henek %ba, 0        ; On s'assure que le registre est propre
+
+; --- GRAVURE DANS LA ZONE SECURISEE (4000+) ---
+duat "Amentys V4 - Stable", 4000
+duat "Zone Memoire Securisee.", 4100
+
+; --- AFFICHAGE ---
+henek %ba, 4000
+jena imprimer           ; Appel de la fonction
+
+henek %ba, 4100
+jena imprimer
+
+arret:
+    neheh arret         ; On fige l'ecran proprement
+
+; --- LE SCRIBE D'AFFICHAGE (V4) ---
+imprimer:
+    sena %ka, [%ba]     ; Lit l'octet pointé par %ba
+    wdj %ka, 0          ; Est-ce le signe du Silence (0) ?
+    ankh fin_fonction   ; Si oui, on s'arrête
+    per %ka             ; Affiche la lettre
+    sema %ba, 1         ; Avance le pointeur
+    neheh imprimer
+fin_fonction:
+    henek %ka, 13       ; Retour a la ligne automatique
     per %ka
-    neheh boucle
-point:
-    per "."
-    return 0
+    return 0            ; Retourne au programme principal

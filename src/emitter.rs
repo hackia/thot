@@ -26,6 +26,7 @@ impl Emitter {
                     destination,
                     valeur,
                 } => {
+                    code_machine.push(0x66); // Préfixe pour forcer le mode 32 bits !
                     // 1. Mapping du Registre Sacré vers le Registre Physique (x86_64)
                     // Dans x86, l'instruction "MOV registre, valeur" commence à l'octet 0xB8
                     // On ajoute un code selon le registre cible.
@@ -55,25 +56,63 @@ impl Emitter {
                         }
                     }
                 }
+                // Traduction de : isfet cible (Saut Conditionnel : JNE)
+                Instruction::Isfet { cible } => {
+                    // OpCode pour JNE near (Sauter si Différent, relatif 16-bit)
+                    code_machine.push(0x0F);
+                    code_machine.push(0x85);
+
+                    // On enregistre l'endroit à patcher EXACTEMENT comme pour ankh
+                    sauts_a_patcher.push((code_machine.len(), cible.clone()));
+
+                    // Placeholders (les zéros temporels)
+                    code_machine.push(0x00);
+                    code_machine.push(0x00);
+                }
                 Instruction::Kheper { source, adresse } => {
                     if source != "ka" {
-                        panic!("The Transmitter only handles %ka to write to RAM at the moment.");
+                        panic!("Seul %ka peut écrire en RAM pour l'instant.");
                     }
-                    // MOV [adresse], AL -> OpCode 0xA2 suivi de l'adresse en Little-Endian (2 octets)
-                    code_machine.push(0xA2);
-                    code_machine.extend_from_slice(&adresse.to_le_bytes());
-                }
 
+                    match adresse {
+                        Expression::Number(n) => {
+                            // Mode Direct (Ancien)
+                            code_machine.push(0xA2);
+                            code_machine.extend_from_slice(&(*n as u16).to_le_bytes());
+                        }
+                        Expression::Register(r) if r == "ba" => {
+                            // Mode Indirect : MOV [EBX], AL
+                            // 0x67 = Prefixe adresse 32-bit, 0x88 = MOV r/m8, r8, 0x03 = [EBX]
+                            code_machine.extend_from_slice(&[0x67, 0x88, 0x03]);
+                        }
+                        _ => panic!("Le Scribe ne sait pointer qu'avec %ba ou une adresse fixe."),
+                    }
+                }
                 Instruction::Sena {
                     destination,
                     adresse,
                 } => {
                     if destination != "ka" {
-                        panic!("The Transmitter only handles %ka to read RAM at the moment.");
+                        panic!("Le Transmetteur ne gère que %ka pour lire en RAM pour l'instant.");
                     }
-                    // MOV AL, [adresse] -> OpCode 0xA0 suivi de l'adresse en Little-Endian
-                    code_machine.push(0xA0);
-                    code_machine.extend_from_slice(&adresse.to_le_bytes());
+
+                    match adresse {
+                        Expression::Number(n) => {
+                            // MODE DIRECT (Ancien) : MOV AL, [adresse_fixe]
+                            code_machine.push(0xA0); // OpCode 0xA0
+                            code_machine.extend_from_slice(&(*n as u16).to_le_bytes());
+                        }
+                        Expression::Register(r) if r == "ba" => {
+                            // MODE INDIRECT (Pointeur) : MOV AL, [EBX]
+                            // 0x67 = Préfixe adresse 32-bit
+                            // 0x8A = MOV r8, r/m8
+                            // 0x03 = ModR/M pour [EBX]
+                            code_machine.extend_from_slice(&[0x67, 0x8A, 0x03]);
+                        }
+                        _ => {
+                            panic!("Le Scribe ne sait lire la RAM qu'avec %ba ou une adresse fixe.")
+                        }
+                    }
                 }
                 Instruction::Sedjem { destination } => {
                     if destination == "ka" {
@@ -100,6 +139,7 @@ impl Emitter {
                     match resultat {
                         Expression::Number(n) => {
                             // MOV EAX, n (Opcode 0xB8)
+                            code_machine.push(0x66); // LA PROTECTION V4
                             code_machine.push(0xB8);
                             code_machine.extend_from_slice(&n.to_le_bytes());
                         }
@@ -136,24 +176,17 @@ impl Emitter {
                         }
                         Expression::Register(r) => {
                             if r == "ka" {
-                                // Le code "Blindé" pour afficher %ka (AL) correctement
-                                let affichage_propre: [u8; 15] = [
-                                    0xB4, 0x0E, // MOV AH, 0x0E (Mode Teletype du BIOS)
+                                let affichage_propre: Vec<u8> = vec![
+                                    0x66,
+                                    0x53, // PUSH EBX : On sauve ton adresse (1000, 1001...)
+                                    0xB4, 0x0E, // MOV AH, 0x0E
                                     0xBB, 0x0F,
-                                    0x00, // MOV BX, 0x000F (Force la Page vidéo 0, Couleur Blanc)
-                                    0xCD,
-                                    0x10, // INT 0x10 (Affiche la lettre stockée dans AL)
-                                    // --- Gestion spéciale de la touche Entrée ---
-                                    0x3C,
-                                    0x0D, // CMP AL, 0x0D (Est-ce que la lettre était "Entrée" ?)
-                                    0x75,
-                                    0x04, // JNE +4 (Si NON, on a fini, on saute les 4 prochains octets)
-                                    0xB0,
-                                    0x0A, // MOV AL, 0x0A (Si OUI, on charge le code "Line Feed" / Saut de ligne)
-                                    0xCD,
-                                    0x10, // INT 0x10 (Et on l'imprime pour descendre d'une ligne)
+                                    0x00, // MOV BX, 0x000F (Ici on peut l'écraser, c'est sauvé !)
+                                    0xCD, 0x10, // INT 0x10
+                                    0x3C, 0x0D, // Gestion de l'Entrée...
+                                    0x75, 0x04, 0xB0, 0x0A, 0xCD, 0x10, 0x66,
+                                    0x5B, // POP EBX : On remet l'adresse intacte dans le registre !
                                 ];
-
                                 code_machine.extend_from_slice(&affichage_propre);
                             }
                         }
@@ -182,8 +215,8 @@ impl Emitter {
                     destination,
                     valeur,
                 } => {
-                    // Opcode de base pour une addition avec un nombre : 0x81
-                    code_machine.push(0x81);
+                    code_machine.push(0x66); // INDISPENSABLE : On force le mode 32 bits !
+                    code_machine.push(0x81); // Opcode ADD
 
                     // On détermine le registre physique (Le ModR/M byte)
                     let modrm: u8 = match destination.as_str() {
@@ -229,6 +262,47 @@ impl Emitter {
                     // Placeholders
                     code_machine.push(0x00);
                     code_machine.push(0x00);
+                }
+                Instruction::Duat { phrase, adresse } => {
+                    for (i, c) in phrase.chars().enumerate() {
+                        // Opcode 0xC6 0x06 = MOV [imm16], imm8
+                        code_machine.push(0xC6);
+                        code_machine.push(0x06);
+                        let addr_actuelle = adresse + i as u16;
+                        code_machine.extend_from_slice(&addr_actuelle.to_le_bytes());
+                        code_machine.push(c as u8);
+                    }
+                    // AJOUT AUTOMATIQUE DU ZÉRO DE FIN
+                    code_machine.push(0xC6);
+                    code_machine.push(0x06);
+                    let addr_zero = adresse + phrase.len() as u16;
+                    code_machine.extend_from_slice(&addr_zero.to_le_bytes());
+                    code_machine.push(0x00);
+                }
+                // Traduction de : kheb %registre, valeur (SUB reg32, imm32)
+                Instruction::Kheb {
+                    destination,
+                    valeur,
+                } => {
+                    code_machine.push(0x66); // INDISPENSABLE : On force le mode 32 bits !
+                    code_machine.push(0x81); // Opcode SUB
+
+                    // On détermine le registre physique pour la soustraction
+                    let modrm: u8 = match destination.as_str() {
+                        "ka" => 0xE8, // EAX
+                        "ib" => 0xE9, // ECX
+                        "ba" => 0xEB, // EBX
+                        _ => panic!("Fatal error : unknown registre '{}' for kheb", destination),
+                    };
+                    code_machine.push(modrm);
+
+                    match valeur {
+                        Expression::Number(n) => {
+                            let octets_valeur = n.to_le_bytes();
+                            code_machine.extend_from_slice(&octets_valeur);
+                        }
+                        _ => panic!("The Emitter only handles numbers for 'kheb' currently"),
+                    }
                 }
             }
         }

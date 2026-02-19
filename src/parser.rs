@@ -83,22 +83,25 @@ impl<'a> Parser<'a> {
                     valeur,
                 }
             }
-            // Traduction de : kheper %registre, adresse
             Token::Verb(v) if v == "kheper" => {
-                self.advance(); // Consomme 'kheper'
-
+                self.advance();
                 let source = match &self.current_token {
                     Token::Register(r) => r.clone(),
-                    _ => panic!("Syntax Error: 'kheper' requires a register as source"),
+                    _ => panic!("Syntax Error: 'kheper' exige un registre source"),
                 };
-                self.advance(); // Consomme le registre
+                self.advance();
+                self.expect_token(Token::Comma);
 
-                self.expect_token(Token::Comma); // Consomme la virgule
-
-                let adresse = match self.parse_expression() {
-                    Expression::Number(n) => n as u16, // On convertit en adresse 16-bit
-                    _ => panic!("Syntax Error: 'kheper' requires a numeric memory address"),
+                // NOUVEAU : Gestion des crochets ou du nombre direct
+                let adresse = if self.current_token == Token::OpenBracket {
+                    self.advance(); // Mange '['
+                    let expr = self.parse_expression();
+                    self.expect_token(Token::CloseBracket); // Mange ']'
+                    expr
+                } else {
+                    self.parse_expression() // Nombre direct (ancien mode)
                 };
+
                 Instruction::Kheper { source, adresse }
             }
             Token::Verb(v) if v == "jena" => {
@@ -116,20 +119,39 @@ impl<'a> Parser<'a> {
 
                 let destination = match &self.current_token {
                     Token::Register(r) => r.clone(),
-                    _ => panic!("Syntax Error: 'sena' requires a register as destination"),
+                    _ => panic!("Syntax Error: 'sena' exige un registre destination"),
                 };
                 self.advance(); // Consomme le registre
 
                 self.expect_token(Token::Comma); // Consomme la virgule
 
-                let adresse = match self.parse_expression() {
-                    Expression::Number(n) => n as u16,
-                    _ => panic!("Syntax Error: 'sena' requires a numeric memory address"),
+                // Gestion des crochets pour les pointeurs dynamiques [%ba]
+                let adresse = if self.current_token == Token::OpenBracket {
+                    self.advance(); // Mange '['
+                    let expr = self.parse_expression();
+                    self.expect_token(Token::CloseBracket); // Mange ']'
+                    expr
+                } else {
+                    self.parse_expression() // Nombre direct (ex: 500)
                 };
+
                 Instruction::Sena {
                     destination,
                     adresse,
                 }
+            }
+            Token::Verb(v) if v == "duat" => {
+                self.advance(); // Consomme 'duat'
+                let phrase = match self.parse_expression() {
+                    Expression::StringLiteral(s) => s,
+                    _ => panic!("Syntax Error: 'duat' attend une phrase entre guillemets"),
+                };
+                self.expect_token(Token::Comma);
+                let adresse = match self.parse_expression() {
+                    Expression::Number(n) => n as u16,
+                    _ => panic!("Syntax Error: 'duat' attend une adresse numérique"),
+                };
+                Instruction::Duat { phrase, adresse }
             }
             Token::Verb(v) if v == "wab" => {
                 self.advance(); // Consomme le mot 'wab'
@@ -224,6 +246,35 @@ impl<'a> Parser<'a> {
                         "Syntax Error: Au debut d'une ligne, '{}' doit etre suivi de ':'. Mais Thot a trouve ceci a la place : {:?}",
                         name, self.current_token
                     );
+                }
+            }
+
+            // Traduction du saut conditionnel : isfet cible (Saut si Différent)
+            Token::Verb(v) if v == "isfet" => {
+                self.advance(); // Consomme 'isfet'
+                let cible = match &self.current_token {
+                    Token::Identifier(i) => i.clone(),
+                    _ => panic!("Syntax Error: 'isfet' exige une etiquette cible"),
+                };
+                self.advance(); // Consomme la cible
+                Instruction::Isfet { cible }
+            }
+            // Traduction de : kheb %registre, valeur
+            Token::Verb(v) if v == "kheb" => {
+                self.advance(); // Consomme 'kheb'
+
+                let destination = match &self.current_token {
+                    Token::Register(r) => r.clone(),
+                    _ => panic!("Syntax Error: 'kheb' requires a register as destination"),
+                };
+                self.advance(); // Consomme le registre
+
+                self.expect_token(Token::Comma); // Consomme la virgule
+
+                let valeur = self.parse_expression(); // Capture la valeur à soustraire
+                Instruction::Kheb {
+                    destination,
+                    valeur,
                 }
             }
             // (On ajoutera 'wdj', 'sema', etc. ici plus tard)
