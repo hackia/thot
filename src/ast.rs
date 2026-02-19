@@ -15,6 +15,10 @@ pub enum Instruction {
         destination: String,
         valeur: Expression,
     },
+    // jena cible (Appel de fonction / CALL)
+    Jena {
+        cible: String,
+    },
     // kheper %registre, adresse (Sauvegarder dans la RAM)
     Kheper {
         source: String,

@@ -2,15 +2,15 @@ use crate::ast::{Expression, Instruction};
 
 pub struct Emitter {
     instructions: Vec<Instruction>,
-    kbd_layout: String,
+    _kbd_layout: String,
 }
 
 impl Emitter {
     // On charge l'Émetteur avec l'Arbre Syntaxique (AST)
-    pub fn new(instructions: Vec<Instruction>, kbd_layout: String) -> Self {
+    pub fn new(instructions: Vec<Instruction>, _kbd_layout: String) -> Self {
         Emitter {
             instructions,
-            kbd_layout,
+            _kbd_layout,
         }
     }
 
@@ -84,6 +84,41 @@ impl Emitter {
                         code_machine.extend_from_slice(&[0xCD, 0x16]); // INT 0x16 (Appel BIOS Clavier)
                     }
                 }
+                Instruction::Jena { cible } => {
+                    // OpCode pour CALL near (Saut relatif 16-bit avec sauvegarde de l'adresse de retour)
+                    code_machine.push(0xE8);
+
+                    // On enregistre l'endroit à patcher EXACTEMENT comme pour Neheh ou Ankh
+                    sauts_a_patcher.push((code_machine.len(), cible.clone()));
+
+                    // Placeholders
+                    code_machine.push(0x00);
+                    code_machine.push(0x00);
+                }
+
+                Instruction::Return { resultat } => {
+                    match resultat {
+                        Expression::Number(n) => {
+                            // MOV EAX, n (Opcode 0xB8)
+                            code_machine.push(0xB8);
+                            code_machine.extend_from_slice(&n.to_le_bytes());
+                        }
+                        Expression::Register(r) => {
+                            if r != "ka" {
+                                panic!(
+                                    "Pour l'instant, le Scribe ne sait renvoyer que des nombres purs ou %ka."
+                                );
+                            }
+                        }
+                        _ => panic!("Le Return de Maât ne gère que les nombres pour le moment."),
+                    }
+                    // Note : Pour l'instant, on ignore 'resultat'. Dans le futur,
+                    // on pourra placer 'resultat' dans %ka juste avant de partir !
+
+                    // Le processeur lit la Pile, retrouve son chemin, et reprend son exécution.
+                    // OpCode pour RET (Return) : 0xC3
+                    code_machine.push(0xC3);
+                }
                 Instruction::Wab => {
                     // Le Sortilège du Vide : MOV AX, 0x0003 puis INT 0x10
                     code_machine.extend_from_slice(&[0xB8, 0x03, 0x00, 0xCD, 0x10]);
@@ -91,14 +126,7 @@ impl Emitter {
                 Instruction::Per { message } => {
                     match message {
                         Expression::StringLiteral(s) => {
-                            // 1. Le Grand Nettoyage (Clear Screen)
-                            // On demande au BIOS de recharger le mode texte standard (80x25).
-                            // Cela efface tout l'écran et place le curseur matériel à la position (0,0).
-                            code_machine.extend_from_slice(&[0xB8, 0x03, 0x00]); // MOV AX, 0x0003
-                            code_machine.extend_from_slice(&[0xCD, 0x10]); // INT 0x10
-
-                            // 2. Écriture propre avec le BIOS (Teletype)
-                            // Le curseur va avancer automatiquement après chaque lettre.
+                            // FINI LE NETTOYAGE ICI ! On ne garde QUE l'écriture propre avec le BIOS.
                             for c in s.chars() {
                                 code_machine.extend_from_slice(&[0xB4, 0x0E]); // MOV AH, 0x0E (Teletype)
                                 code_machine.push(0xB0); // MOV AL, caractère
@@ -110,15 +138,20 @@ impl Emitter {
                             if r == "ka" {
                                 // Le code "Blindé" pour afficher %ka (AL) correctement
                                 let affichage_propre: [u8; 15] = [
-                                    0xB4, 0x0E,       // MOV AH, 0x0E (Mode Teletype du BIOS)
-                                    0xBB, 0x0F, 0x00, // MOV BX, 0x000F (Force la Page vidéo 0, Couleur Blanc)
-                                    0xCD, 0x10,       // INT 0x10 (Affiche la lettre stockée dans AL)
-
+                                    0xB4, 0x0E, // MOV AH, 0x0E (Mode Teletype du BIOS)
+                                    0xBB, 0x0F,
+                                    0x00, // MOV BX, 0x000F (Force la Page vidéo 0, Couleur Blanc)
+                                    0xCD,
+                                    0x10, // INT 0x10 (Affiche la lettre stockée dans AL)
                                     // --- Gestion spéciale de la touche Entrée ---
-                                    0x3C, 0x0D,       // CMP AL, 0x0D (Est-ce que la lettre était "Entrée" ?)
-                                    0x75, 0x04,       // JNE +4 (Si NON, on a fini, on saute les 4 prochains octets)
-                                    0xB0, 0x0A,       // MOV AL, 0x0A (Si OUI, on charge le code "Line Feed" / Saut de ligne)
-                                    0xCD, 0x10,       // INT 0x10 (Et on l'imprime pour descendre d'une ligne)
+                                    0x3C,
+                                    0x0D, // CMP AL, 0x0D (Est-ce que la lettre était "Entrée" ?)
+                                    0x75,
+                                    0x04, // JNE +4 (Si NON, on a fini, on saute les 4 prochains octets)
+                                    0xB0,
+                                    0x0A, // MOV AL, 0x0A (Si OUI, on charge le code "Line Feed" / Saut de ligne)
+                                    0xCD,
+                                    0x10, // INT 0x10 (Et on l'imprime pour descendre d'une ligne)
                                 ];
 
                                 code_machine.extend_from_slice(&affichage_propre);
@@ -196,14 +229,6 @@ impl Emitter {
                     // Placeholders
                     code_machine.push(0x00);
                     code_machine.push(0x00);
-                }
-                // Traduction de : return valeur (RET)
-                Instruction::Return { .. } => {
-                    // En Bootloader, on ne peut pas faire "RET" car il n'y a pas d'OS vers qui retourner.
-                    // On doit arrêter le processeur pour qu'il ne lise pas le vide.
-                    // 1. CLI (0xFA) -> Coupe les interruptions (On devient sourd)
-                    // 2. HLT (0xF4) -> Halt (Le processeur s'endort pour l'éternité)
-                    code_machine.extend_from_slice(&[0xFA, 0xF4]);
                 }
             }
         }

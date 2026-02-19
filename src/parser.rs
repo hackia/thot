@@ -63,7 +63,7 @@ impl<'a> Parser<'a> {
 
     // Analyse une instruction complète
     pub fn parse_instruction(&mut self) -> Instruction {
-        match &self.current_token {
+        match self.current_token() {
             Token::Verb(v) if v == "henek" => {
                 self.advance(); // Consomme 'henek'
 
@@ -101,7 +101,15 @@ impl<'a> Parser<'a> {
                 };
                 Instruction::Kheper { source, adresse }
             }
-
+            Token::Verb(v) if v == "jena" => {
+                self.advance(); // Consomme 'jena'
+                if let Token::Identifier(cible) = self.current_token.clone() {
+                    self.advance(); // Consomme le nom de la fonction (SANS CHERCHER DE ':')
+                    Instruction::Jena { cible }
+                } else {
+                    panic!("Syntax Error: 'jena' attend un nom de fonction.");
+                }
+            }
             // Traduction de : sena %registre, adresse
             Token::Verb(v) if v == "sena" => {
                 self.advance(); // Consomme 'sena'
@@ -118,7 +126,10 @@ impl<'a> Parser<'a> {
                     Expression::Number(n) => n as u16,
                     _ => panic!("Syntax Error: 'sena' requires a numeric memory address"),
                 };
-                Instruction::Sena { destination, adresse }
+                Instruction::Sena {
+                    destination,
+                    adresse,
+                }
             }
             Token::Verb(v) if v == "wab" => {
                 self.advance(); // Consomme le mot 'wab'
@@ -134,23 +145,16 @@ impl<'a> Parser<'a> {
                 self.advance(); // Consomme la cible
                 Instruction::Ankh { cible }
             }
-            // Traduction d'une étiquette (ex: "debut:")
-            Token::Identifier(nom) => {
-                let nom_label = nom.clone();
-                self.advance(); // Consomme l'identifiant
-                self.expect_token(Token::Colon); // Exige les deux points ":"
-                Instruction::Label(nom_label)
-            }
 
             // Traduction du saut inconditionnel : neheh cible
             Token::Verb(v) if v == "neheh" => {
                 self.advance(); // Consomme 'neheh'
-                let cible = match &self.current_token {
-                    Token::Identifier(i) => i.clone(),
-                    _ => panic!("Syntax Error: 'neheh' nécessite le nom d'une étiquette (Identifier)"),
-                };
-                self.advance(); // Consomme la cible
-                Instruction::Neheh { cible }
+                if let Token::Identifier(cible) = self.current_token.clone() {
+                    self.advance(); // Consomme la cible (SANS CHERCHER DE ':')
+                    Instruction::Neheh { cible }
+                } else {
+                    panic!("Syntax Error: 'neheh' attend une cible.");
+                }
             }
             Token::Verb(v) if v == "sedjem" => {
                 self.advance(); // Consomme 'sedjem'
@@ -208,6 +212,19 @@ impl<'a> Parser<'a> {
                 self.advance(); // Consomme 'returne'
                 let resultat = self.parse_expression(); // Capture ce qu'on renvoie
                 Instruction::Return { resultat } // (Assure-toi que ça correspond au nom exact dans ton ast.rs)
+            }
+            Token::Identifier(name) => {
+                self.advance(); // Consomme le nom
+                if self.current_token == Token::Colon {
+                    self.advance(); // Consomme le ':'
+                    Instruction::Label(name)
+                } else {
+                    // LE SORTILÈGE DE RÉVÉLATION :
+                    panic!(
+                        "Syntax Error: Au debut d'une ligne, '{}' doit etre suivi de ':'. Mais Thot a trouve ceci a la place : {:?}",
+                        name, self.current_token
+                    );
+                }
             }
             // (On ajoutera 'wdj', 'sema', etc. ici plus tard)
             _ => panic!("Syntax Error: Unknown instruction {:?}", self.current_token),

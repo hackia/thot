@@ -143,7 +143,7 @@ impl<'a> Lexer<'a> {
                 // Check if it's a known Maât verb
                 match word.as_str() {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
-                    | "kheper" | "per" | "return" | "sedjem" | "wab" => Token::Verb(word),
+                    | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" => Token::Verb(word),
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }
