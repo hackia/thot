@@ -5,6 +5,7 @@ mod emitter;
 mod lexer;
 mod parser;
 
+use crate::ast::Instruction;
 use crate::boot::Naos;
 use crate::elf::Sarcophage;
 use crate::emitter::Emitter;
@@ -12,7 +13,7 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use clap::{Arg, ArgAction, Command, value_parser};
 use std::fs;
-use std::fs::read_to_string;
+use std::path::Path;
 
 fn cli() -> Command {
     Command::new(env!("CARGO_PKG_NAME"))
@@ -51,48 +52,108 @@ fn cli() -> Command {
         )
 }
 
+// Le Tisserand : Il parcourt les instructions et remplace les "dema" par le vrai code
+pub fn tisser_tablettes(
+    instructions_brutes: Vec<Instruction>,
+    dossier_courant: &Path,
+) -> Vec<Instruction> {
+    let mut instructions_finales = Vec::new();
+
+    for instruction in instructions_brutes {
+        match instruction {
+            Instruction::Dema { chemin } => {
+                // 1. On trouve le chemin absolu du nouveau fichier
+                let mut chemin_complet = dossier_courant.join(&chemin);
+                if chemin_complet.extension().is_none() {
+                    chemin_complet.set_extension("maat");
+                }
+                // 2. On lit le parchemin
+                let code_inclus = fs::read_to_string(&chemin_complet).unwrap_or_else(|_| {
+                    panic!(
+                        "The Scribe could not find the tablet: {:?}",
+                        chemin_complet
+                    )
+                });
+
+                // 3. On relance les Yeux et l'Esprit sur ce nouveau texte
+                let lexer = Lexer::new(&code_inclus);
+                let mut parser = Parser::new(lexer);
+
+                let mut sous_instructions = Vec::new();
+                while parser.not_eof() {
+                    sous_instructions.push(parser.parse_instruction());
+                }
+
+                // 4. RÉCURSION : On tisse ce nouveau fichier au cas où IL contienne aussi des 'dema' !
+                let dossier_parent = chemin_complet.parent().unwrap_or(Path::new(""));
+                let sous_instructions_tissees = tisser_tablettes(sous_instructions, dossier_parent);
+
+                // 5. On fusionne les instructions tissées dans notre ligne temporelle principale
+                instructions_finales.extend(sous_instructions_tissees);
+            }
+            // Si c'est une instruction normale, ont la garde intacte
+            autre => instructions_finales.push(autre),
+        }
+    }
+    instructions_finales
+}
+
 fn main() {
     let matches = cli().get_matches();
-    if let Some(file) = matches.get_one::<String>("file")
-        && let Some(o) = matches.get_one::<String>("output")
-    {
-        // 1. Notre code source Maât (Zep Tepi)
-        // On met la valeur 42 dans %ka, on ajoute 1 avec sema, et on quitte !
-        let code_source = read_to_string(file).expect("Unable to read file");
-        // 2. Lexer (Les Yeux)
-        let lexer = Lexer::new(code_source.as_str());
-        // 3. Parser (L'Esprit)
-        let mut parser = Parser::new(lexer);
-        let kbd_layout = matches
-            .get_one::<String>("kbd")
-            .expect("failed to get kbd")
-            .clone();
 
-        // 4. Émetteur (Le Marteau)
-        // On passe maintenant la disposition du clavier !
-        let mut instructions = Vec::new();
-        // On boucle pour lire toutes les lignes jusqu'à la fin (Eof)
-        while parser.not_eof() {
-            instructions.push(parser.parse_instruction());
-        }
-        let emetteur = Emitter::new(instructions, kbd_layout);
-        let code_machine = emetteur.generer_binaire();
-        let binaire_final = if matches.get_flag("boot") {
-            Naos::emballer(&code_machine)
-        } else {
-            Sarcophage::emballer(&code_machine)
-        };
+    // On utilise if let imbriqués (plus stable sur toutes les versions de Rust)
+    if let Some(file) = matches.get_one::<String>("file") {
+        if let Some(o) = matches.get_one::<String>("output") {
+            let kbd_layout = matches
+                .get_one::<String>("kbd")
+                .expect("failed to get kbd")
+                .clone();
 
-        // 6. Écriture sur le disque dur
-        fs::write(o, binaire_final).expect("Erreur lors de l'écriture du fichier");
+            // --- LA CORRECTION EST ICI ---
+            // 1. Le Scribe lit le parchemin principal
+            let code_source = fs::read_to_string(file)
+                .expect("Erreur fatale : Le Scribe n'a pas pu lire le fichier source principal.");
 
-        #[cfg(unix)]
-        {
-            if !matches.get_flag("boot") {
-                // On ne met les droits d'exécution que pour les ELF, un disque brut s'en fiche
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(o, fs::Permissions::from_mode(0o777))
-                    .expect("failed to set execute permissions");
+            // 2. Les Yeux (Lexer) et l'Esprit (Parser) analysent le texte
+            let lexer = Lexer::new(&code_source);
+            let mut parser = Parser::new(lexer);
+
+            // 3. On remplit le vecteur avec les vraies instructions du fichier
+            let mut instructions = Vec::new();
+            while parser.not_eof() {
+                instructions.push(parser.parse_instruction());
+            }
+            // ------------------------------
+
+            // On récupère le dossier du fichier principal pour gérer les chemins relatifs
+            let chemin_fichier_principal = Path::new(file);
+            let dossier_principal = chemin_fichier_principal.parent().unwrap_or(Path::new(""));
+
+            // On aplatit l'arbre syntaxique en résolvant toutes les inclusions
+            let instructions_fusionnees = tisser_tablettes(instructions, dossier_principal);
+
+            // 4. Émetteur (Le Marteau)
+            // On lui donne maintenant les instructions fusionnées, pures de tout 'dema'
+            let emetteur = Emitter::new(instructions_fusionnees, kbd_layout);
+            let code_machine = emetteur.generer_binaire();
+
+            let binaire_final = if matches.get_flag("boot") {
+                Naos::emballer(&code_machine)
+            } else {
+                Sarcophage::emballer(&code_machine)
+            };
+
+            // 6. Écriture sur le disque dur
+            fs::write(o, binaire_final).expect("Erreur lors de l'écriture du fichier");
+
+            #[cfg(unix)]
+            {
+                if !matches.get_flag("boot") {
+                    // On ne met les droits d'exécution que pour les ELF, un disque brut s'en fiche
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(o, fs::Permissions::from_mode(0o777))
+                        .expect("failed to set execute permissions");
+                }
             }
         }
     }

@@ -140,6 +140,60 @@ impl<'a> Parser<'a> {
                     adresse,
                 }
             }
+            // Dans src/parser.rs (dans la méthode parse_instruction)
+            Token::Verb(v) if v == "dema" => {
+                self.advance(); // Consomme 'dema'
+                let chemin = match self.parse_expression() {
+                    Expression::StringLiteral(s) => s,
+                    _ => panic!("Syntax Error: 'dema' attend le chemin du parchemin entre guillemets"),
+                };
+                Instruction::Dema { chemin }
+            }
+            Token::Verb(v) if v == "her" || v == "kher" || v == "her_ankh" || v == "kher_ankh" => {
+                let type_saut = v.clone();
+                self.advance();
+                let cible = match &self.current_token {
+                    Token::Identifier(i) => i.clone(),
+                    _ => panic!("Erreur : {type_saut} exige une cible"),
+                };
+                self.advance();
+                match type_saut.as_str() {
+                    "her" => Instruction::Her { cible },
+                    "kher" => Instruction::Kher { cible },
+                    "her_ankh" => Instruction::HerAnkh { cible },
+                    _ => Instruction::KherAnkh { cible },
+                }
+            }
+            // Traduction de : henet %registre, valeur (AND)
+            Token::Verb(v) if v == "henet" => {
+                self.advance();
+                let destination = match &self.current_token {
+                    Token::Register(r) => r.clone(),
+                    _ => panic!("Syntax Error: 'henet' exige un registre"),
+                };
+                self.advance();
+                self.expect_token(Token::Comma);
+                let valeur = self.parse_expression();
+                Instruction::Henet {
+                    destination,
+                    valeur,
+                }
+            }
+            // Traduction de : mer %registre, valeur (OR)
+            Token::Verb(v) if v == "mer" => {
+                self.advance();
+                let destination = match &self.current_token {
+                    Token::Register(r) => r.clone(),
+                    _ => panic!("Syntax Error: 'mer' exige un registre"),
+                };
+                self.advance();
+                self.expect_token(Token::Comma);
+                let valeur = self.parse_expression();
+                Instruction::Mer {
+                    destination,
+                    valeur,
+                }
+            }
             Token::Verb(v) if v == "duat" => {
                 self.advance(); // Consomme 'duat'
                 let phrase = match self.parse_expression() {

@@ -15,6 +15,31 @@ pub enum Instruction {
         destination: String,
         valeur: Expression,
     },
+    Dema {
+        chemin: String,
+    },
+    // henet %registre, valeur (AND logique)
+    Henet {
+        destination: String,
+        valeur: Expression,
+    },
+    // mer %registre, valeur (OR logique)
+    Mer {
+        destination: String,
+        valeur: Expression,
+    },
+    Her {
+        cible: String,
+    }, // JG
+    Kher {
+        cible: String,
+    }, // JL
+    HerAnkh {
+        cible: String,
+    }, // JGE
+    KherAnkh {
+        cible: String,
+    }, // JLE
     // duat "Ma phrase", adresse
     Duat {
         phrase: String,

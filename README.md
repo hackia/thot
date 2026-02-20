@@ -1,27 +1,39 @@
-# Amentys OS & The Maât Language
+# Thot
 
-Amentys is not just a standard operating system; it is a bare-metal philosophy. Built without traditional binaries, it aims to eliminate chaos (Isfet) through strict hardware purity. It is written in **Maât**, a custom symbolic, typeless, and event-driven assembly language.
+| Verb      | desc     | action                                                                                                        |
+|-----------|----------|---------------------------------------------------------------------------------------------------------------|
+| henek     | MOV      | Give Assigns an immediate value or register to a ship (register).                                             |
+| sema      | ADD      | Unite: Adds a value to the force contained in a ship.                                                         |
+| kheb      | SUB      | Reduce: Subtracts a value from the force contained in a ship.                                                 |
+| wdj       | CMP      | Weigh: Compares (weighs) a ship against a value on the Balance of Maat.                                       | 
+| ankh      | JE       | Life: Conditional jump to a label if Libra is in balance (Tie).                                               |
+| isfet     | JNE      | Chaos: Conditional jump to a label if Libra is broken (Difference).                                           |
+| her       | JG       | avoid: Conditional jump if the ship is strictly greater than the value.                                       |
+| kher      | JL       | Depth: Conditional jump if the ship is strictly less than the value.                                          |
+| her_ankh  | JGE      | Peak: Conditional jump if the ship is greater than or equal to the value.                                     |
+| kher_ankh | JLE      | Base: Conditional jump if the ship is less than or equal to the value.                                        |
+| neheh     | JMP      | Eternity: Unconditional jump (infinite loop) to a label.                                                      |
+| jena      | CALL     | Summon: Calls a ritual (function) and prepares for the return of the code soul.                               |
+| return    | RET      | Return: Leaves a ritual to resume the thread of the previous existence.                                       |
+| duat      | DB / MOV | Burn: Writes a sentence in RAM with the automatic Sign of Silence (null terminator).                          |
+| sena      | MOV      | Collect: Loads data into %ka from a RAM address or a [%ba] pointer.                                           |
+| kheper    | MOV      | Embody: Saves the contents of %ka to a RAM address or [%ba] pointer.ka from a RAM address or a [%ba] pointer. |
+| henet     | AND      | assemble: Logical operation AND (Bitwise AND).                                                                |
+| mer       | OR       | Link: Logical operation OR (Bitwise OR).                                                                      |
+| per       | INT 10h  | Manifest: Displays a character, register or phrase on the screen.                                             |
+| sedjem    | INT 16h  | Listen: Interrupts time and waits for a keyboard pulse (stored in %ka).                                       |
+| wab       | INT 10h  | Purify: Clears the screen and resets the sacred void (Clear Screen).                                          |
 
-The compiler, **Thot**, acts as the scribe. It reads the Sacred Verbs (Maât source code) and translates them directly into pure x86_64 machine code, packaging them either as a Linux executable (Sarcophage) or a raw 512-byte bootloader (Naos).
+| register | description                                                   |
+|----------|---------------------------------------------------------------|
+| %ka      | Accumulator (EAX) – The seat of mathematical power.           |
+| %ib      | Counter (ECX) – The master of time and cycles.ematical power. |
+| %da      | Data (EDX) – The servant of inputs/outputs.                   |
+| %ba      | Base (EBX) – The finger that points to memory.                |
+| %si      | Source (ESI) – The origin of data flows.                      |
+| %di      | Destination (EDI) – The arrival of data flows.                |
 
-## Key Features
-
-* **Zero-Overhead Bare Metal:** Talk directly to the silicon without BIOS interruptions (in pure mode).
-* **Dual-Output Compiler:** Generate standalone 64-bit ELF binaries or raw bootable disk images.
-* **Sacred Registers:** Hardware registers are abstracted into metaphysical vessels (`%ka` for the Accumulator, `%ib` for the Counter, etc.).
-
-## Prerequisites
-
-To forge the OS and compile the Thot compiler, you will need:
-
-* **Rust & Cargo** (to build the compiler)
-* **QEMU** (to emulate the bare-metal bootloader)
-
-## Getting Started
-
-### 1. Build the Compiler (Thot)
-
-Clone the repository and build the Rust project:
+## Installation of the thot compiler
 
 ```bash
 cargo install thot
@@ -29,16 +41,69 @@ cargo install thot
 
 ### 2. Write your first Maât Law
 
-Create a file named `os.maat`. Here is an example of an infinite echo terminal:
+Create a file named `os.maat`. Here is an example.
 
 ```text
-wab             ; Purify the screen (Clear)
-per "Terminal Amentys Pret."
+wab                             ; Purifie l'écran (Clear Screen)
 
-boucle:
-    sedjem %ka  ; Wait for a keystroke and store in %ka
-    per %ka     ; Print the keystroke to the screen
-    neheh boucle; Infinite loop back to 'boucle'
+; --- 1. GRAVURE DU DOGME (Zone sécurisée 4000+) ---
+; On inscrit les vérités fondamentales dans la mémoire vive
+duat "AMENTYS OS V5 - THEOREM:", 4000
+duat "Infinite function in a finite world.", 4100
+duat "Iteration progress: ", 4200
+duat "Finite world reached. Stability achieved.", 4300
+
+; --- 2. CÉRÉMONIE D'OUVERTURE ---
+henek %ba, 4000                 ; Charge l'adresse du titre
+jena imprimer_ligne             ; Appelle le scribe d'affichage
+
+henek %ba, 4100                 ; Charge l'adresse du théorème
+jena imprimer_ligne
+
+; --- 3. L'EXPANSION INFINIE (Boucle de calcul) ---
+henek %ib, 0                    ; %ib sert de compteur d'itération
+henek %da, 10                   ; %da définit la limite du "monde fini"
+
+boucle_expansion:
+henek %ba, 4200             ; "Iteration progress: "
+jena imprimer_mots          ; Affiche sans retour à la ligne
+
+; On affiche un symbole '*' pour chaque itération
+henek %ka, 42               ; Code ASCII pour '*'
+per %ka
+
+henek %ka, 13               ; Retour à la ligne pour la clarté
+per %ka
+
+sema %ib, 1                 ; Incrémente l'itérateur
+wdj %ib, %da                ; Compare l'itérateur à la limite du monde fini
+kher boucle_expansion       ; Tant que %ib < 10, l'expansion continue
+
+
+; --- 4. LA STABILITÉ FINALE ---
+henek %ba, 4300
+jena imprimer_ligne
+
+arret_eternel:
+neheh arret_eternel         ; Le système reste en contemplation infinie
+
+; --- RITUEL : IMPRIMER LIGNE (Texte + Saut) ---
+imprimer_ligne:
+jena imprimer_mots
+henek %ka, 13               ; Ajoute un Carriage Return (13)
+per %ka
+return 0
+
+; --- RITUEL : IMPRIMER MOTS (Lecture RAM) ---
+imprimer_mots:
+sena %ka, [%ba]             ; Lit l'octet pointé par %ba dans la RAM
+wdj %ka, 0                  ; Est-ce le Signe du Silence (fin de chaîne) ?
+ankh fin_rituel
+per %ka                     ; Envoie le caractère au BIOS
+sema %ba, 1                 ; Avance le pointeur vers la lettre suivante
+neheh imprimer_mots
+fin_rituel:
+return 0
 ```
 
 ### 3. Invoke the Scribe (Compilation)
@@ -53,13 +118,11 @@ The Thot compiler uses positional arguments:
 thot os.maat os.bin true qwerty
 ```
 
-**To compile as a Linux ELF Executable (Sarcophage):**
+**To compile as an Amentys ELF Executable (Sarcophage):**
 
 ```bash
 thot os.maat os.elf false qwerty
 ```
-
-*(Note: You can replace `qwerty` with `azerty` if needed).*
 
 ### 4. Run the Universe
 
@@ -68,17 +131,3 @@ To boot your newly created OS image in a virtual machine:
 ```bash
 qemu-system-x86_64 -drive format=raw,file=os.bin
 ```
-
-## The Sacred Verbs (Language Reference)
-
-| Verb     | Equivalent | Description                                                  |
-|----------|------------|--------------------------------------------------------------|
-| `henek`  | `MOV`      | Assigns a value to a register (e.g., `henek %ka, 10`).       |
-| `sema`   | `ADD`      | Adds a value to a register (e.g., `sema %ka, 5`).            |
-| `wdj`    | `CMP`      | Weighs (compares) a register against a value.                |
-| `ankh`   | `JE`       | Conditional jump to a label if the previous `wdj` was equal. |
-| `neheh`  | `JMP`      | Unconditional jump to a label (Eternal loop).                |
-| `per`    | `PRINT`    | Prints a string or the content of a register to the screen.  |
-| `sedjem` | `LISTEN`   | Halts the CPU and waits for hardware input (keyboard).       |
-| `wab`    | `CLEAR`    | Purifies the screen (clears all text).                       |
-| `;`      | `//`       | A Whisper (Comment). Ignored by the compiler.                |

@@ -1,0 +1,4 @@
+;; INTENTION : Purifier le terminal
+nettoyer_ecran:
+    wab                     ; Purifie l'écran (Clear Screen)
+    return 0                ; Laisse le rituel pour reprendre le fil de l'existence précédente

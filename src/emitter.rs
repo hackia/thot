@@ -31,10 +31,13 @@ impl Emitter {
                     // Dans x86, l'instruction "MOV registre, valeur" commence à l'octet 0xB8
                     // On ajoute un code selon le registre cible.
                     let code_registre: u8 = match destination.as_str() {
-                        "ka" => 0x00, // %ka devient EAX (l'accumulateur mathématique)
-                        "ib" => 0x01, // %ib devient ECX (le compteur/cœur)
-                        "ba" => 0x03, // %ba devient EBX (la base mémoire)
-                        _ => panic!("Fatal error : unknow registre '{destination}'"),
+                        "ka" => 0x00, // EAX
+                        "ib" => 0x01, // ECX
+                        "da" => 0x02, // EDX (Nouveau !)
+                        "ba" => 0x03, // EBX
+                        "si" => 0x06, // ESI (Nouveau !)
+                        "di" => 0x07, // EDI (Nouveau !)
+                        _ => panic!("Registre inconnu : {}", destination),
                     };
 
                     // L'Opcode principal (0xB8 + 0 = 0xB8 pour EAX)
@@ -55,6 +58,19 @@ impl Emitter {
                             )
                         }
                     }
+                }
+
+                Instruction::Her { cible } => {
+                    code_machine.push(0x0F);
+                    code_machine.push(0x8F); // OpCode pour JG (Saut si plus grand)
+                    sauts_a_patcher.push((code_machine.len(), cible.clone()));
+                    code_machine.extend_from_slice(&[0x00, 0x00]);
+                }
+                Instruction::Kher { cible } => {
+                    code_machine.push(0x0F);
+                    code_machine.push(0x8C); // OpCode pour JL (Saut si plus petit)
+                    sauts_a_patcher.push((code_machine.len(), cible.clone()));
+                    code_machine.extend_from_slice(&[0x00, 0x00]);
                 }
                 // Traduction de : isfet cible (Saut Conditionnel : JNE)
                 Instruction::Isfet { cible } => {
@@ -134,7 +150,46 @@ impl Emitter {
                     code_machine.push(0x00);
                     code_machine.push(0x00);
                 }
-
+                Instruction::Henet {
+                    destination,
+                    valeur,
+                } => {
+                    code_machine.push(0x66); // Stabilisation 32 bits
+                    code_machine.push(0x81); // Opcode groupe logique
+                    let modrm: u8 = match destination.as_str() {
+                        "ka" => 0xE0, // EAX
+                        "ib" => 0xE1, // ECX
+                        "da" => 0xE2, // EDX (Celui qui manquait !)
+                        "ba" => 0xE3, // EBX
+                        "si" => 0xE6, // ESI (Nouveau V5)
+                        "di" => 0xE7, // EDI (Nouveau V5)
+                        _ => panic!("Registre inconnu pour henet : {}", destination),
+                    };
+                    code_machine.push(modrm);
+                    if let Expression::Number(n) = valeur {
+                        code_machine.extend_from_slice(&n.to_le_bytes()); //
+                    }
+                }
+                Instruction::Mer {
+                    destination,
+                    valeur,
+                } => {
+                    code_machine.push(0x66);
+                    code_machine.push(0x81);
+                    let modrm: u8 = match destination.as_str() {
+                        "ka" => 0xC8, // EAX
+                        "ib" => 0xC9, // ECX
+                        "da" => 0xCA, // EDX
+                        "ba" => 0xCB, // EBX
+                        "si" => 0xCE, // ESI
+                        "di" => 0xCF, // EDI
+                        _ => panic!("Registre inconnu pour mer : {}", destination),
+                    };
+                    code_machine.push(modrm);
+                    if let Expression::Number(n) = valeur {
+                        code_machine.extend_from_slice(&n.to_le_bytes());
+                    }
+                }
                 Instruction::Return { resultat } => {
                     match resultat {
                         Expression::Number(n) => {
@@ -215,38 +270,56 @@ impl Emitter {
                     destination,
                     valeur,
                 } => {
-                    code_machine.push(0x66); // INDISPENSABLE : On force le mode 32 bits !
+                    code_machine.push(0x66); // Stabilisation 32 bits
                     code_machine.push(0x81); // Opcode ADD
 
-                    // On détermine le registre physique (Le ModR/M byte)
+                    // Extension /0 pour l'addition (C0, C1, C2...)
                     let modrm: u8 = match destination.as_str() {
                         "ka" => 0xC0, // EAX
                         "ib" => 0xC1, // ECX
+                        "da" => 0xC2, // EDX (V5)
                         "ba" => 0xC3, // EBX
-                        _ => panic!("Fatal error : unknown registre '{destination}' for sema"),
+                        "si" => 0xC6, // ESI (V5)
+                        "di" => 0xC7, // EDI (V5)
+                        _ => panic!("Registre inconnu pour sema : {}", destination),
                     };
                     code_machine.push(modrm);
 
                     match valeur {
                         Expression::Number(n) => {
-                            let octets_valeur = n.to_le_bytes();
-                            code_machine.extend_from_slice(&octets_valeur);
+                            code_machine.extend_from_slice(&n.to_le_bytes());
                         }
-                        _ => panic!("The Emitter only handles numbers for 'sema' currently"),
+                        _ => panic!("Sema ne supporte que les nombres pour le moment."),
                     }
                 }
                 // Traduction de : wdj %registre, valeur (CMP AL, imm8)
+                // Traduction de : wdj %registre, valeur (CMP reg32, imm32)
                 Instruction::Wdj { left, right } => {
-                    if left != "ka" {
-                        panic!("In Bare-Metal OS mode, we only compare %ka for the moment.");
-                    }
+                    // 1. On force le mode 32 bits pour la précision
+                    code_machine.push(0x66);
+
+                    // 2. OpCode universel de comparaison : 0x81
+                    code_machine.push(0x81);
+
+                    // 3. On détermine le ModR/M (L'extension /7 pour CMP)
+                    let modrm: u8 = match left.as_str() {
+                        "ka" => 0xF8, // EAX
+                        "ib" => 0xF9, // ECX
+                        "da" => 0xFA, // EDX
+                        "ba" => 0xFB, // EBX
+                        "si" => 0xFE, // ESI
+                        "di" => 0xFF, // EDI
+                        _ => panic!("Registre inconnu pour la balance : {}", left),
+                    };
+                    code_machine.push(modrm);
+
+                    // 4. On écrit la valeur sur 4 octets (32 bits)
                     match right {
                         Expression::Number(n) => {
-                            // OpCode 0x3C = Compare AL (notre registre %ka) avec une valeur d'1 octet
-                            code_machine.push(0x3C);
-                            code_machine.push(*n as u8); // Le code ASCII à comparer
+                            let octets_valeur = n.to_le_bytes();
+                            code_machine.extend_from_slice(&octets_valeur);
                         }
-                        _ => panic!("The Transmitter only compares numbers (ASCII codes)."),
+                        _ => panic!("La Balance ne sait peser que des nombres pour l'instant."),
                     }
                 }
 
@@ -280,29 +353,65 @@ impl Emitter {
                     code_machine.push(0x00);
                 }
                 // Traduction de : kheb %registre, valeur (SUB reg32, imm32)
+                // Traduction de : kheb %registre, valeur (SUB reg32, imm32)
                 Instruction::Kheb {
                     destination,
                     valeur,
                 } => {
-                    code_machine.push(0x66); // INDISPENSABLE : On force le mode 32 bits !
-                    code_machine.push(0x81); // Opcode SUB
+                    // 1. Protection 32 bits pour la stabilité du CPU
+                    code_machine.push(0x66);
 
-                    // On détermine le registre physique pour la soustraction
+                    // 2. OpCode de base pour les opérations mathématiques étendues
+                    code_machine.push(0x81);
+
+                    // 3. Mapping complet des registres pour la soustraction (/5)
                     let modrm: u8 = match destination.as_str() {
                         "ka" => 0xE8, // EAX
                         "ib" => 0xE9, // ECX
+                        "da" => 0xEA, // EDX (Nouveau V5)
                         "ba" => 0xEB, // EBX
-                        _ => panic!("Fatal error : unknown registre '{}' for kheb", destination),
+                        "si" => 0xEE, // ESI (Nouveau V5)
+                        "di" => 0xEF, // EDI (Nouveau V5)
+                        _ => panic!("Registre inconnu pour kheb : {}", destination),
                     };
                     code_machine.push(modrm);
 
+                    // 4. Écriture de la valeur à soustraire
                     match valeur {
                         Expression::Number(n) => {
                             let octets_valeur = n.to_le_bytes();
                             code_machine.extend_from_slice(&octets_valeur);
                         }
-                        _ => panic!("The Emitter only handles numbers for 'kheb' currently"),
+                        _ => panic!("Le Scribe ne sait soustraire que des nombres pour l'instant."),
                     }
+                }
+                Instruction::HerAnkh { cible } => {
+                    // OpCode pour JGE (Jump if Greater or Equal)
+                    code_machine.push(0x0F);
+                    code_machine.push(0x8D);
+
+                    // On enregistre l'emplacement pour le patcher plus tard
+                    sauts_a_patcher.push((code_machine.len(), cible.clone()));
+
+                    // On laisse 2 octets vides pour la distance (le "trou" à patcher)
+                    code_machine.extend_from_slice(&[0x00, 0x00]);
+                }
+                Instruction::KherAnkh { cible } => {
+                    // OpCode pour JLE (Jump if Less or Equal)
+                    code_machine.push(0x0F);
+                    code_machine.push(0x8E);
+
+                    // On enregistre l'emplacement pour le patcher plus tard
+                    sauts_a_patcher.push((code_machine.len(), cible.clone()));
+
+                    // On laisse 2 octets vides pour la distance
+                    code_machine.extend_from_slice(&[0x00, 0x00]);
+                },
+                Instruction::Dema { chemin } => {
+                    panic!(
+                        "Erreur fatale de Maât : L'Émetteur a trouvé une instruction 'dema' pointant vers '{}'. Le Tisserand a oublié de fusionner cette tablette avant la génération du binaire !",
+                        chemin
+                    );
                 }
             }
         }
@@ -332,26 +441,23 @@ impl Emitter {
 mod tests {
     use super::*;
     use crate::ast::{Expression, Instruction};
-
     #[test]
     fn test_generer_binaire_henek() {
-        // On simule l'Arbre (AST) donné par le Parser pour "henek %ka, 10"
         let ast = vec![Instruction::Henek {
             destination: "ka".to_string(),
-            valeur: Expression::Number(10), // 10 en décimal = 0x0A en hexadécimal
+            valeur: Expression::Number(10),
         }];
 
         let emetteur = Emitter::new(ast, "qwerty".to_string());
         let binaire = emetteur.generer_binaire();
 
-        // Le Moment de Vérité :
+        // 0x66 = Préfixe 32-bit
         // 0xB8 = MOV EAX
-        // 0x0A, 0x00, 0x00, 0x00 = Le nombre 10 en 32 bits (Little-Endian)
-        assert_eq!(binaire, vec![0xB8, 0x0A, 0x00, 0x00, 0x00]);
+        // 0x0A, 0x00, 0x00, 0x00 = 10 en Little-Endian
+        assert_eq!(binaire, vec![0x66, 0xB8, 0x0A, 0x00, 0x00, 0x00]);
     }
     #[test]
     fn test_generer_binaire_sema() {
-        // sema %ka, 5 -> On s'attend à ADD EAX, 5
         let ast = vec![Instruction::Sema {
             destination: "ka".to_string(),
             valeur: Expression::Number(5),
@@ -359,13 +465,24 @@ mod tests {
         let emetteur = Emitter::new(ast, "qwerty".to_string());
         let binaire = emetteur.generer_binaire();
 
+        // 0x66 = Préfixe
         // 0x81 0xC0 = ADD EAX
         // 0x05 0x00 0x00 0x00 = Le chiffre 5
-        assert_eq!(binaire, vec![0x81, 0xC0, 0x05, 0x00, 0x00, 0x00]);
+        assert_eq!(binaire, vec![0x66, 0x81, 0xC0, 0x05, 0x00, 0x00, 0x00]);
     }
-
     #[test]
-    #[should_panic]
+    fn test_generer_binaire_return() {
+        let ast = vec![Instruction::Return {
+            resultat: Expression::Number(0),
+        }];
+        let emetteur = Emitter::new(ast, "qwerty".to_string());
+        let binaire = emetteur.generer_binaire();
+
+        // 0x66 0xB8 00 00 00 00 = MOV EAX, 0
+        // 0xC3 = RET
+        assert_eq!(binaire, vec![0x66, 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3]);
+    }
+    #[test]
     fn test_generer_binaire_wdj() {
         // wdj %ib, 0 -> On s'attend à CMP ECX, 0
         let ast = vec![Instruction::Wdj {
@@ -375,19 +492,7 @@ mod tests {
         let emetteur = Emitter::new(ast, "qwerty".to_string());
         let binaire = emetteur.generer_binaire();
 
-        // 0x81 0xF9 = CMP ECX
-        // 0x00 0x00 0x00 0x00 = Le chiffre 0 (Le Zéro)
-        assert_eq!(binaire, vec![0x81, 0xF9, 0x00, 0x00, 0x00, 0x00]);
-    }
-    #[test]
-    fn test_generer_binaire_return() {
-        let ast = vec![Instruction::Return {
-            resultat: Expression::Identifier("Success".to_string()),
-        }];
-        let emetteur = Emitter::new(ast, "qwerty".to_string());
-        let binaire = emetteur.generer_binaire();
-
-        // Un seul octet : RET
-        assert_eq!(binaire, vec![0xFA, 0xF4]);
+        // 0x66 (Prefix) 0x81 0xF9 (CMP ECX) 00 00 00 00 (Valeur)
+        assert_eq!(binaire, vec![0x66, 0x81, 0xF9, 0x00, 0x00, 0x00, 0x00]);
     }
 }
