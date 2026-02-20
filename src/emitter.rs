@@ -18,7 +18,7 @@ impl Emitter {
     pub fn generer_binaire(&self) -> Vec<u8> {
         let mut code_machine: Vec<u8> = Vec::new();
         let mut labels = std::collections::HashMap::new();
-        let mut sauts_a_patcher = Vec::new();
+        let mut sauts_a_patcher: Vec<(usize, Expression)> = Vec::new();
         let mut variables = std::collections::HashMap::new();
         let mut prochaine_adresse_ram: u16 = 8192;
         for instruction in &self.instructions {
@@ -138,6 +138,7 @@ impl Emitter {
                         _ => panic!("Le port OUT doit être un nombre ou le registre %da"),
                     }
                 }
+
                 Instruction::Her { cible } => {
                     code_machine.push(0x0F);
                     code_machine.push(0x8F); // OpCode pour JG (Saut si plus grand)
@@ -179,7 +180,7 @@ impl Emitter {
                             // NOUVEAU : Sauvegarde directe dans la variable
                             let adresse = *variables
                                 .get(nom)
-                                .expect(&format!("Erreur : Variable '{}' introuvable", nom));
+                                .expect(&format!("Erreur : Variable '{nom}' introuvable"));
                             code_machine.push(0xA2); // OpCode MOV [moffs8], AL
                             code_machine.extend_from_slice(&(adresse as u16).to_le_bytes());
                         }
@@ -210,7 +211,7 @@ impl Emitter {
                                 "ba" => 0xC3,
                                 "si" => 0xC6,
                                 "di" => 0xC7,
-                                _ => panic!("Registre inconnu pour sema : {}", destination),
+                                _ => panic!("Registre inconnu pour sema : {destination}"),
                             };
                             code_machine.push(modrm);
                             code_machine.extend_from_slice(&n.to_le_bytes());
@@ -236,7 +237,7 @@ impl Emitter {
                                 "ba" => 3,
                                 "si" => 6,
                                 "di" => 7,
-                                _ => panic!("Registre source inconnu : {}", src),
+                                _ => panic!("Registre source inconnu : {src}"),
                             };
 
                             // Formule x86 magique (ModR/M) : 0xC0 (11000000 en binaire) + (source * 8) + destination
@@ -491,37 +492,56 @@ impl Emitter {
                     code_machine.extend_from_slice(&addr_zero.to_le_bytes());
                     code_machine.push(0x00);
                 }
-                // Traduction de : kheb %registre, valeur (SUB reg32, imm32)
-                // Traduction de : kheb %registre, valeur (SUB reg32, imm32)
+                // Traduction de : kheb %registre, valeur (SUB)
                 Instruction::Kheb {
                     destination,
                     valeur,
                 } => {
-                    // 1. Protection 32 bits pour la stabilité du CPU
-                    code_machine.push(0x66);
+                    code_machine.push(0x66); // Stabilisation 32 bits
 
-                    // 2. OpCode de base pour les opérations mathématiques étendues
-                    code_machine.push(0x81);
-
-                    // 3. Mapping complet des registres pour la soustraction (/5)
-                    let modrm: u8 = match destination.as_str() {
-                        "ka" => 0xE8, // EAX
-                        "ib" => 0xE9, // ECX
-                        "da" => 0xEA, // EDX (Nouveau V5)
-                        "ba" => 0xEB, // EBX
-                        "si" => 0xEE, // ESI (Nouveau V5)
-                        "di" => 0xEF, // EDI (Nouveau V5)
-                        _ => panic!("Registre inconnu pour kheb : {}", destination),
-                    };
-                    code_machine.push(modrm);
-
-                    // 4. Écriture de la valeur à soustraire
                     match valeur {
                         Expression::Number(n) => {
-                            let octets_valeur = n.to_le_bytes();
-                            code_machine.extend_from_slice(&octets_valeur);
+                            // MODE 1 : Soustraire un Nombre (SUB r/m32, imm32)
+                            code_machine.push(0x81);
+                            let modrm: u8 = match destination.as_str() {
+                                "ka" => 0xE8,
+                                "ib" => 0xE9,
+                                "da" => 0xEA,
+                                "ba" => 0xEB,
+                                "si" => 0xEE,
+                                "di" => 0xEF,
+                                _ => panic!("Registre inconnu pour kheb : {destination}"),
+                            };
+                            code_machine.push(modrm);
+                            code_machine.extend_from_slice(&n.to_le_bytes());
                         }
-                        _ => panic!("Le Scribe ne sait soustraire que des nombres pour l'instant."),
+                        Expression::Register(src) => {
+                            // MODE 2 : Soustraire un Registre (SUB r/m32, reg32)
+                            code_machine.push(0x29); // OpCode SUB registre à registre
+
+                            let dest_code = match destination.as_str() {
+                                "ka" => 0,
+                                "ib" => 1,
+                                "da" => 2,
+                                "ba" => 3,
+                                "si" => 6,
+                                "di" => 7,
+                                _ => panic!("Registre destination inconnu : {}", destination),
+                            };
+                            let src_code = match src.as_str() {
+                                "ka" => 0,
+                                "ib" => 1,
+                                "da" => 2,
+                                "ba" => 3,
+                                "si" => 6,
+                                "di" => 7,
+                                _ => panic!("Registre source inconnu : {}", src),
+                            };
+
+                            let modrm = 0xC0 | (src_code << 3) | dest_code;
+                            code_machine.push(modrm);
+                        }
+                        _ => panic!("Kheb ne supporte que les nombres ou les registres."),
                     }
                 }
                 Instruction::HerAnkh { cible } => {
@@ -555,7 +575,7 @@ impl Emitter {
                 // Traduction de : nama nom = valeur
                 Instruction::Nama { nom, valeur } => {
                     // 1. ALLOCATION MÉMOIRE (Où va-t-on écrire ?)
-                    let adresse = if let Some(addr) = variables.get(nom) {
+                    let adresse = if let Some(addr) = variables.get(&nom.clone()) {
                         *addr // La variable existe déjà, on réutilise son adresse
                     } else {
                         let addr = prochaine_adresse_ram;
@@ -605,22 +625,30 @@ impl Emitter {
                     }
                 }
                 Instruction::Smen { .. } => {}
+                Instruction::CurrentAddress => {}
             }
         }
-        // --- LA PASSE DE PATCH (Résolution des Sauts) ---
-        for (offset_du_trou, cible) in sauts_a_patcher {
-            // On cherche où se trouve vraiment l'étiquette
-            let adresse_cible = labels
-                .get(&cible)
-                .expect(&format!("Erreur fatale : Étiquette '{cible}' introuvable",));
+        // Dans src/emitter.rs, à la fin de generer_binaire
+        for (offset_du_trou, expression_cible) in sauts_a_patcher {
+            // On transforme l'Expression en une adresse physique (isize)
+            let adresse_cible = match expression_cible {
+                // Cas 1 : C'est une étiquette classique (String)
+                Expression::Identifier(nom) => *labels
+                    .get(&nom)
+                    .expect(&format!("Étiquette '{nom}' introuvable"))
+                    as isize,
+                // Cas 2 : C'est le symbole sacré $ (CurrentAddress)
+                Expression::CurrentAddress => {
+                    // L'adresse de l'instruction elle-même est juste avant le trou
+                    (offset_du_trou - 1) as isize
+                }
+                _ => panic!("Isfet : Cible de saut invalide (seuls les labels et $ sont permis)"),
+            };
 
-            // Le processeur calcule la distance à partir de l'octet *suivant* l'instruction complète (offset + 2)
-            let distance = (*adresse_cible as isize) - ((offset_du_trou + 2) as isize);
-
-            // On convertit la distance en 16-bit (Little-Endian)
+            // Calcul de la distance relative pour l'OpCode x86 (ex: E9 ou EB)
+            let distance = adresse_cible - ((offset_du_trou + 2) as isize);
             let bytes_distance = (distance as i16).to_le_bytes();
 
-            // On remonte dans le temps pour écraser les zéros avec la vraie distance
             code_machine[offset_du_trou] = bytes_distance[0];
             code_machine[offset_du_trou + 1] = bytes_distance[1];
         }

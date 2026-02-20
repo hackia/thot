@@ -65,7 +65,6 @@ impl<'a> Parser<'a> {
                 panic!("Isfet : Thot ne résout que des constantes pour le moment.");
             }
         }
-
         gauche
     }
 
@@ -121,6 +120,32 @@ impl<'a> Parser<'a> {
     // Analyse une instruction complète
     pub fn parse_instruction(&mut self) -> Instruction {
         match self.current_token() {
+            Token::Verb(v) if v == "neheh" || v == "ankh" || v == "isfet" || v == "jena" => {
+                let verbe = v.clone();
+                self.advance();
+                let cible = self.parse_expression(); // parse_expression gère déjà $ ou Identifiant !
+
+                match verbe.as_str() {
+                    "neheh" => Instruction::Neheh { cible },
+                    "ankh" => Instruction::Ankh { cible },
+                    "isfet" => Instruction::Isfet { cible },
+                    _ => Instruction::Jena { cible }, // jena
+                }
+            }
+
+            Token::Verb(v) if v == "her" || v == "kher" || v == "her_ankh" || v == "kher_ankh" => {
+                let type_saut = v.clone();
+                self.advance();
+                let cible = self.parse_expression();
+
+                match type_saut.as_str() {
+                    "her" => Instruction::Her { cible },
+                    "kher" => Instruction::Kher { cible },
+                    "her_ankh" => Instruction::HerAnkh { cible },
+                    _ => Instruction::KherAnkh { cible },
+                }
+            }
+
             Token::Verb(v) if v == "henek" => {
                 self.advance(); // Consomme 'henek'
 
@@ -140,6 +165,7 @@ impl<'a> Parser<'a> {
                     valeur,
                 }
             }
+            // Fais la même chose pour ankh, isfet, jena, her, etc.
             Token::Verb(v) if v == "smen" => {
                 self.advance();
                 let nom = match &self.current_token {
@@ -176,15 +202,6 @@ impl<'a> Parser<'a> {
                 };
 
                 Instruction::Kheper { source, adresse }
-            }
-            Token::Verb(v) if v == "jena" => {
-                self.advance(); // Consomme 'jena'
-                if let Token::Identifier(cible) = self.current_token.clone() {
-                    self.advance(); // Consomme le nom de la fonction (SANS CHERCHER DE ':')
-                    Instruction::Jena { cible }
-                } else {
-                    panic!("Syntax Error: 'jena' attend un nom de fonction.");
-                }
             }
             // Traduction de : sena %registre, adresse
             Token::Verb(v) if v == "sena" => {
@@ -224,26 +241,11 @@ impl<'a> Parser<'a> {
                 };
                 Instruction::Dema { chemin }
             }
-            Token::Verb(v) if v == "her" || v == "kher" || v == "her_ankh" || v == "kher_ankh" => {
-                let type_saut = v.clone();
-                self.advance();
-                let cible = match &self.current_token {
-                    Token::Identifier(i) => i.clone(),
-                    _ => panic!("Erreur : {type_saut} exige une cible"),
-                };
-                self.advance();
-                match type_saut.as_str() {
-                    "her" => Instruction::Her { cible },
-                    "kher" => Instruction::Kher { cible },
-                    "her_ankh" => Instruction::HerAnkh { cible },
-                    _ => Instruction::KherAnkh { cible },
-                }
-            }
             Token::Verb(v) if v == "rdtsc" => {
                 self.advance();
                 Instruction::Rdtsc
             }
-            // Traduction de : henet %registre, valeur (AND)
+            // Traduction de : henet %regi&&&&&&&&&&&&&&&&&&&&&&stre, valeur (AND)
             Token::Verb(v) if v == "henet" => {
                 self.advance();
                 let destination = match &self.current_token {
@@ -319,20 +321,24 @@ impl<'a> Parser<'a> {
             // Traduction du saut conditionnel : ankh cible
             Token::Verb(v) if v == "ankh" => {
                 self.advance(); // Consomme 'ankh'
-                let cible = match &self.current_token {
+                let _cible = match &self.current_token {
                     Token::Identifier(i) => i.clone(),
                     _ => panic!("Syntax Error: 'ankh' requires a target label"),
                 };
                 self.advance(); // Consomme la cible
-                Instruction::Ankh { cible }
+                Instruction::Ankh {
+                    cible: self.parse_expression(),
+                }
             }
 
             // Traduction du saut inconditionnel : neheh cible
             Token::Verb(v) if v == "neheh" => {
                 self.advance(); // Consomme 'neheh'
-                if let Token::Identifier(cible) = self.current_token.clone() {
+                if let Token::Identifier(_cible) = self.current_token.clone() {
                     self.advance(); // Consomme la cible (SANS CHERCHER DE ':')
-                    Instruction::Neheh { cible }
+                    Instruction::Neheh {
+                        cible: self.parse_expression(),
+                    }
                 } else {
                     panic!("Syntax Error: 'neheh' attend une cible.");
                 }
@@ -431,14 +437,17 @@ impl<'a> Parser<'a> {
             // Traduction du saut conditionnel : isfet cible (Saut si Différent)
             Token::Verb(v) if v == "isfet" => {
                 self.advance(); // Consomme 'isfet'
-                let cible = match &self.current_token {
+                let _cible = match &self.current_token {
                     Token::Identifier(i) => i.clone(),
                     _ => panic!("Syntax Error: 'isfet' exige une etiquette cible"),
                 };
-                self.advance(); // Consomme la cible
-                Instruction::Isfet { cible }
+                self.advance();
+
+                Instruction::Isfet {
+                    cible: self.parse_expression(),
+                }
             }
-            // Traduction de : kheb %registre, valeur
+            // Traduction de : kheb %registre, valeur&
             Token::Verb(v) if v == "kheb" => {
                 self.advance(); // Consomme 'kheb'
 

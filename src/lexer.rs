@@ -24,6 +24,7 @@ pub enum Token {
     Minus, // -
     Star,  // *
     Slash, // /
+    Dollar, // $ (L'adresse actuelle)
     // End of File
     Eof,
     OpenBracket,
@@ -66,15 +67,8 @@ impl<'a> Lexer<'a> {
         match c {
             '=' => Token::Equals,
             '+' => Token::Plus,
-            '-' => {
-                // On vérifie s'il s'agit d'un nombre négatif ou de l'opérateur Moins
-                if let Some(&next_char) = self.input.peek() {
-                    if next_char.is_digit(10) {
-                        // ... garde ici ton ancienne logique pour les nombres négatifs
-                    }
-                }
-                Token::Minus
-            }
+            '$' => Token::Dollar,
+            '-' => Token::Minus,
             '*' => Token::Star,
             '/' => Token::Slash,
             ';' => {

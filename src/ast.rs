@@ -1,15 +1,17 @@
 // Une Valeur peut être plusieurs choses dans Maât
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub enum Expression {
     Number(i32),
     Register(String),
     Identifier(String),
     StringLiteral(String),
+    CurrentAddress,
 }
 
 // Les Instructions pures (La Loi)
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, Hash, Clone, PartialEq)]
 pub enum Instruction {
+    CurrentAddress, // Le symbole $
     // nama mon_identifiant = valeur
     Nama {
         nom: String,
@@ -57,39 +59,41 @@ pub enum Instruction {
         destination: String,
         valeur: Expression,
     },
+    // Change String en Expression pour tous les sauts
+    Neheh {
+        cible: Expression,
+    },
+    Ankh {
+        cible: Expression,
+    },
+    Isfet {
+        cible: Expression,
+    },
+    Jena {
+        cible: Expression,
+    },
     Her {
-        cible: String,
-    }, // JG
+        cible: Expression,
+    },
     Kher {
-        cible: String,
-    }, // JL
+        cible: Expression,
+    },
     HerAnkh {
-        cible: String,
-    }, // JGE
+        cible: Expression,
+    },
     KherAnkh {
-        cible: String,
-    }, // JLE
+        cible: Expression,
+    },
     // duat "Ma phrase", adresse
     Duat {
         phrase: String,
         adresse: u16,
     },
-    // jena cible (Appel de fonction / CALL)
-    Jena {
-        cible: String,
-    },
+
     // kheper %registre, adresse (Sauvegarder dans la RAM)
     Kheper {
         source: String,
         adresse: Expression,
-    },
-    // ankh cible (Saute vers l'étiquette SI la comparaison précédente est égale)
-    Ankh {
-        cible: String,
-    },
-    // isfet cible (Saute SI la comparaison précédente est DIFFERENTE)
-    Isfet {
-        cible: String,
     },
     Kheb {
         destination: String,
@@ -108,11 +112,6 @@ pub enum Instruction {
     },
     // Une étiquette dans le code (ex: "boucle:")
     Label(String),
-
-    // neheh cible (Saute vers l'étiquette)
-    Neheh {
-        cible: String,
-    },
     // wdj %registre, valeur
     Wdj {
         left: String,

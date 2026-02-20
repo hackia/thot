@@ -1,24 +1,38 @@
-; --- MESURE DE PERFORMANCE ---
-
+; --- INITIALISATION ---
+wab                             ; Purifie l'écran
+nama compteur = 0               ; Notre index 'i'
 nama cycles_debut = 0
 nama cycles_fin = 0
 
-debut_mesure:
-    rdtsc                   ; Lit les cycles actuels
-    kheper %ka, cycles_debut ; Sauvegarde le début (32 bits bas)
+per "MESURES DE PERFS AMENTYS :\n"
 
-    ; --- LE CODE À TESTER (Ex: La transmutation clavier) ---
-    henek %ba, table_clavier
-    sema %ba, 30
-    sena %ka, [%ba]
-    ; -------------------------------------------------------
+boucle_mesure:
+    ; 1. Top départ (Zep Tepi)
+    rdtsc                       ; Lit les cycles -> %ka
+    kheper %ka, [cycles_debut]  ; Sauvegarde le temps de départ
 
-    rdtsc                   ; Lit les cycles à la fin
-    kheper %ka, cycles_fin   ; Sauvegarde la fin
+    ; 2. L'action à mesurer (Afficher i)
+    sena %ka, [compteur]        ; Charge 'i'
+    sema %ka, 48                ; Convertit en ASCII (0 -> '0')
+    per %ka                     ; Affiche le chiffre
+    per " "                     ; Espace pour la lisibilité
 
-    ; --- CALCUL DU COÛT ---
-    sena %ka, cycles_fin    ; Charge la fin dans %ka
-    sena %ib, cycles_debut  ; Charge le début dans %ib
-    kheb %ka, %ib           ; %ka = cycles_fin - cycles_debut
+    ; 3. Top fin
+    rdtsc                       ; Lit les cycles -> %ka
+    kheper %ka, [cycles_fin]    ; Sauvegarde le temps de fin
 
-    ; %ka contient maintenant le nombre exact de cycles CPU consommés !
+    ; 4. Calcul du coût de l'affichage
+    sena %ka, [cycles_fin]
+    sena %ib, [cycles_debut]
+    kheb %ka, %ib               ; %ka = cycles_fin - cycles_debut
+
+    ; --- LOGIQUE DE BOUCLE ---
+    sena %ka, [compteur]
+    sema %ka, 1                 ; i++
+    kheper %ka, [compteur]
+
+    wdj %ka, 10                 ; On s'arrête à 10 ?
+    isfet boucle_mesure         ; Si i != 10, on recommence
+
+per "\nFIN DES TESTS."
+neheh $                        ; Arrête le temps
