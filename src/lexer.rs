@@ -120,17 +120,48 @@ impl<'a> Lexer<'a> {
                 }
                 Token::Number(number_str.parse::<i32>().unwrap())
             }
-            // If it's a digit -> It's a Number
+            // Dans src/lexer.rs
+
+            // If it's a digit -> It's a Number (Decimal or Hexadecimal)
             '0'..='9' => {
-                let mut number_str = c.to_string();
+                let mut is_hex = false;
+                // On vérifie le sceau de l'hexadécimal : "0x" ou "0X"
+                if c == '0' {
+                    if let Some(&next_char) = self.input.peek() {
+                        if next_char == 'x' || next_char == 'X' {
+                            is_hex = true;
+                            self.input.next(); // On "mange" le 'x'
+                        }
+                    }
+                }
+
+                let mut number_str = String::new();
+                if !is_hex {
+                    number_str.push(c); // On garde le premier chiffre (ex: '5') si c'est du décimal
+                }
+
+                // On extrait la suite des caractères
                 while let Some(&next_char) = self.input.peek() {
-                    if next_char.is_digit(10) {
+                    if is_hex && next_char.is_ascii_hexdigit() {
+                        // is_ascii_hexdigit() accepte 0-9, a-f, et A-F !
+                        number_str.push(self.input.next().unwrap());
+                    } else if !is_hex && next_char.is_digit(10) {
                         number_str.push(self.input.next().unwrap());
                     } else {
                         break;
                     }
                 }
-                Token::Number(number_str.parse::<i32>().unwrap())
+
+                if is_hex {
+                    if number_str.is_empty() {
+                        panic!("Erreur fatale : '0x' doit être suivi de chiffres hexadécimaux.");
+                    }
+                    // On convertit la chaîne hexadécimale en un i32 pur
+                    Token::Number(i32::from_str_radix(&number_str, 16).unwrap())
+                } else {
+                    // Conversion classique en base 10
+                    Token::Number(number_str.parse::<i32>().unwrap())
+                }
             }
 
             // If it's a letter -> It's a Verb or an Identifier
@@ -230,6 +261,29 @@ mod tests {
         assert_eq!(lexer.next_token(), Token::Identifier("Wdj".to_string()));
         assert_eq!(lexer.next_token(), Token::Eof);
     }
+    #[test]
+    fn test_nombres_hexadecimaux() {
+        // Test : Thot sait-il lire l'hexadécimal et le décimal dans la même phrase ?
+        let mut lexer = Lexer::new("henek %ka, 0x60 \n sema %ib, 42 \n in 0xFF");
+
+        // henek %ka, 0x60 (96 en décimal)
+        assert_eq!(lexer.next_token(), Token::Verb("henek".to_string()));
+        assert_eq!(lexer.next_token(), Token::Register("ka".to_string()));
+        assert_eq!(lexer.next_token(), Token::Comma);
+        assert_eq!(lexer.next_token(), Token::Number(96)); // 0x60 = 96
+
+        // sema %ib, 42 (Le décimal classique doit toujours marcher)
+        assert_eq!(lexer.next_token(), Token::Verb("sema".to_string()));
+        assert_eq!(lexer.next_token(), Token::Register("ib".to_string()));
+        assert_eq!(lexer.next_token(), Token::Comma);
+        assert_eq!(lexer.next_token(), Token::Number(42));
+
+        // in 0xFF (255 en décimal)
+        assert_eq!(lexer.next_token(), Token::Verb("in".to_string()));
+        assert_eq!(lexer.next_token(), Token::Number(255)); // 0xFF = 255
+
+        assert_eq!(lexer.next_token(), Token::Eof);
+    }   
 
     #[test]
     fn test_string_literal() {
