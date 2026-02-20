@@ -19,6 +19,8 @@ impl Emitter {
         let mut code_machine: Vec<u8> = Vec::new();
         let mut labels = std::collections::HashMap::new();
         let mut sauts_a_patcher = Vec::new();
+        let mut variables = std::collections::HashMap::new();
+        let mut prochaine_adresse_ram: u16 = 8192;
         for instruction in &self.instructions {
             match instruction {
                 // Traduction de : henek %registre, valeur
@@ -47,16 +49,18 @@ impl Emitter {
                     // 2. Écriture de la valeur
                     match valeur {
                         Expression::Number(n) => {
-                            // Les processeurs lisent les chiffres à l'envers (Little-Endian).
-                            // Ex: 10 (0x0000000A) devient [0x0A, 0x00, 0x00, 0x00]
                             let octets_valeur = n.to_le_bytes();
                             code_machine.extend_from_slice(&octets_valeur);
                         }
-                        _ => {
-                            panic!(
-                                "The Transmitter only knows how to handle raw numbers at the moment"
-                            )
+                        Expression::Identifier(nom) => {
+                            // NOUVEAU : Thot cherche l'adresse de la variable dans son Registre
+                            let adresse = *variables.get(nom).expect(&format!("Erreur fatale : La variable '{}' n'existe pas !", nom));
+
+                            // On convertit l'adresse (u16) en 32 bits (u32) pour remplir le registre
+                            let octets_valeur = (adresse as u32).to_le_bytes();
+                            code_machine.extend_from_slice(&octets_valeur);
                         }
+                        _ => panic!("L'Émetteur ne sait gérer que des nombres purs ou des noms de variables connus pour l'instant."),
                     }
                 }
                 Instruction::Push { cible } => {
@@ -158,19 +162,21 @@ impl Emitter {
                     if source != "ka" {
                         panic!("Seul %ka peut écrire en RAM pour l'instant.");
                     }
-
                     match adresse {
                         Expression::Number(n) => {
-                            // Mode Direct (Ancien)
                             code_machine.push(0xA2);
                             code_machine.extend_from_slice(&(*n as u16).to_le_bytes());
                         }
                         Expression::Register(r) if r == "ba" => {
-                            // Mode Indirect : MOV [EBX], AL
-                            // 0x67 = Prefixe adresse 32-bit, 0x88 = MOV r/m8, r8, 0x03 = [EBX]
                             code_machine.extend_from_slice(&[0x67, 0x88, 0x03]);
                         }
-                        _ => panic!("Le Scribe ne sait pointer qu'avec %ba ou une adresse fixe."),
+                        Expression::Identifier(nom) => {
+                            // NOUVEAU : Sauvegarde directe dans la variable
+                            let adresse = *variables.get(nom).expect(&format!("Erreur : Variable '{}' introuvable", nom));
+                            code_machine.push(0xA2); // OpCode MOV [moffs8], AL
+                            code_machine.extend_from_slice(&(adresse as u16).to_le_bytes());
+                        }
+                        _ => panic!("Le Scribe ne sait pointer qu'avec %ba, une adresse fixe, ou une variable."),
                     }
                 }
                 // Traduction de : sema %registre, valeur (ADD)
@@ -234,23 +240,21 @@ impl Emitter {
                     if destination != "ka" {
                         panic!("Le Transmetteur ne gère que %ka pour lire en RAM pour l'instant.");
                     }
-
                     match adresse {
                         Expression::Number(n) => {
-                            // MODE DIRECT (Ancien) : MOV AL, [adresse_fixe]
-                            code_machine.push(0xA0); // OpCode 0xA0
+                            code_machine.push(0xA0);
                             code_machine.extend_from_slice(&(*n as u16).to_le_bytes());
                         }
                         Expression::Register(r) if r == "ba" => {
-                            // MODE INDIRECT (Pointeur) : MOV AL, [EBX]
-                            // 0x67 = Préfixe adresse 32-bit
-                            // 0x8A = MOV r8, r/m8
-                            // 0x03 = ModR/M pour [EBX]
                             code_machine.extend_from_slice(&[0x67, 0x8A, 0x03]);
                         }
-                        _ => {
-                            panic!("Le Scribe ne sait lire la RAM qu'avec %ba ou une adresse fixe.")
+                        Expression::Identifier(nom) => {
+                            // NOUVEAU : Lecture directe depuis la variable
+                            let adresse = *variables.get(nom).expect(&format!("Erreur : Variable '{}' introuvable", nom));
+                            code_machine.push(0xA0); // OpCode MOV AL, [moffs8]
+                            code_machine.extend_from_slice(&(adresse as u16).to_le_bytes());
                         }
+                        _ => panic!("Le Scribe ne sait lire la RAM qu'avec %ba, une adresse fixe, ou une variable."),
                     }
                 }
                 Instruction::Sedjem { destination } => {
@@ -405,7 +409,7 @@ impl Emitter {
                                 "ba" => 0xFB,
                                 "si" => 0xFE,
                                 "di" => 0xFF,
-                                _ => panic!("Registre inconnu pour la balance : {}", left),
+                                _ => panic!("Registre inconnu pour la balance : {left}"),
                             };
                             code_machine.push(modrm);
                             code_machine.extend_from_slice(&n.to_le_bytes());
@@ -530,6 +534,56 @@ impl Emitter {
                         "Erreur fatale de Maât : L'Émetteur a trouvé une instruction 'dema' pointant vers '{}'. Le Tisserand a oublié de fusionner cette tablette avant la génération du binaire !",
                         chemin
                     );
+                }
+                // Traduction de : nama nom = valeur
+                Instruction::Nama { nom, valeur } => {
+                    // 1. ALLOCATION MÉMOIRE (Où va-t-on écrire ?)
+                    let adresse = if let Some(addr) = variables.get(nom) {
+                        *addr // La variable existe déjà, on réutilise son adresse
+                    } else {
+                        let addr = prochaine_adresse_ram;
+                        variables.insert(nom.clone(), addr);
+                        // On réserve 4 octets (32 bits) pour un nombre
+                        prochaine_adresse_ram += 4;
+                        addr
+                    };
+
+                    // 2. ÉCRITURE PHYSIQUE (Génération des Opcodes)
+                    match valeur {
+                        Expression::Number(n) => {
+                            // Étape A : On place le nombre dans l'Accumulateur %ka (EAX)
+                            code_machine.push(0x66); // Mode 32-bit
+                            code_machine.push(0xB8); // OpCode MOV EAX, imm32
+                            code_machine.extend_from_slice(&n.to_le_bytes());
+
+                            // Étape B : On sauvegarde EAX dans la RAM à l'adresse allouée
+                            // 0xA3 est l'OpCode magique pour : MOV [adresse_16_bits], EAX
+                            code_machine.push(0x66);
+                            code_machine.push(0xA3);
+                            code_machine.extend_from_slice(&adresse.to_le_bytes());
+                        }
+                        Expression::StringLiteral(s) => {
+                            // Si c'est une phrase (ex: nama titre = "Amentys")
+                            // On écrit lettre par lettre comme pour l'instruction 'duat'
+                            for (i, c) in s.chars().enumerate() {
+                                code_machine.push(0xC6); // MOV [imm16], imm8
+                                code_machine.push(0x06);
+                                let addr_actuelle = adresse + (i as u16);
+                                code_machine.extend_from_slice(&addr_actuelle.to_le_bytes());
+                                code_machine.push(c as u8);
+                            }
+                            // On n'oublie pas le zéro de fin (Signe du Silence)
+                            code_machine.push(0xC6);
+                            code_machine.push(0x06);
+                            let addr_zero = adresse + s.len() as u16;
+                            code_machine.extend_from_slice(&addr_zero.to_le_bytes());
+                            code_machine.push(0x00);
+                            // On met à jour l'espace total occupé par la phrase
+                            // pour que la prochaine variable ne l'écrase pas !
+                            prochaine_adresse_ram = addr_zero + 1;
+                        }
+                        _ => panic!("Le Scribe ne sait assigner que des nombres ou des phrases pour l'instant."),
+                    }
                 }
             }
         }

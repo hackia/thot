@@ -10,7 +10,11 @@ pub enum Expression {
 // Les Instructions pures (La Loi)
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
-    // Dans src/ast.rs, ajoute ces variantes dans l'enum Instruction
+    // nama mon_identifiant = valeur
+    Nama {
+        nom: String,
+        valeur: Expression,
+    },
 
     // push %registre ou push nombre
     Push {

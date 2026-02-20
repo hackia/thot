@@ -6,38 +6,37 @@ dema "keyboard.maat"
 
 ; --- 3. LE POINT D'ENTRÉE ---
 zep_tepi:
-    wab
+    wab                             ; Purifie l'écran
 
-    ; La Pierre de Rosette en RAM (à l'adresse 5000)
-    duat "??1234567890-=?  qwertyuiop[]\n?asdfghjkl;'`?\\zxcvbnm,./? *? ", 5000
+    ; --- LE REGISTRE DES NOMS (Allocation Automatique) ---
+    ; Thot va calculer lui-même la taille et l'adresse en RAM (0x2000)
+    nama table_clavier = "??1234567890-=?  qwertyuiop[]\n?asdfghjkl;'`?\\zxcvbnm,./? *? "
 
 boucle_principale:
-    jena lire_clavier_brut          ; %ka contient le Scancode brut
+    jena lire_clavier_brut          ; Écoute la touche -> Scancode dans %ka
 
-    ; --- L'INTERCEPTION DU RETOUR ARRIÈRE ---
-    wdj %ka, 14                     ; Pèse le Scancode : est-ce la touche Backspace (14) ?
-    ankh rituel_effacement          ; Si c'est l'Équilibre (Égal), on saute vers le rituel !
+    ; --- INTERCEPTION DES COMMANDES ---
+    wdj %ka, 14                     ; Est-ce le Retour Arrière ?
+    ankh rituel_effacement
 
-    ; --- SÉCURITÉ CONTRE LE CHAOS ---
-    wdj %ka, 58
-    her boucle_principale           ; On ignore les touches au-delà de l'Espace
+    wdj %ka, 58                     ; Sécurité contre les touches inconnues
+    her boucle_principale
 
-    ; --- LA TRANSMUTATION (Lettres normales) ---
-    henek %ba, 5000
-    sema %ba, %ka
-    sena %ka, [%ba]
-    per %ka
+    ; --- LA TRANSMUTATION SYMBOLIQUE ---
+    henek %ba, table_clavier        ; Thot injecte l'adresse allouée automatiquement !
+    sema %ba, %ka                   ; On ajoute l'index (Scancode) à l'adresse
+    sena %ka, [%ba]                 ; On récolte la lettre correspondante
+
+    per %ka                         ; Manifestation à l'écran
+
     neheh boucle_principale
 
-; --- LE RITUEL D'EFFACEMENT (L'Ouroboros) ---
+; --- LE RITUEL D'EFFACEMENT ---
 rituel_effacement:
-    henek %ka, 8                    ; 1. Code ASCII du Backspace
-    per %ka                         ; Recule
-
-    henek %ka, 32                   ; 2. Code ASCII de l'Espace
-    per %ka                         ; Écrase avec du vide
-
-    henek %ka, 8                    ; 3. Code ASCII du Backspace
-    per %ka                         ; Recule à nouveau
-
-    neheh boucle_principale         ; On retourne écouter le clavier
+    henek %ka, 8
+    per %ka
+    henek %ka, 32
+    per %ka
+    henek %ka, 8
+    per %ka
+    neheh boucle_principale

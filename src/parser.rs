@@ -45,20 +45,48 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // Extrait une expression (ex: 10, "Alerte", ou un identifiant)
     fn parse_expression(&mut self) -> Expression {
-        let expr = match &self.current_token {
+        // 1. On capture la première partie (Valeur positive ou négative)
+        let mut gauche = match &self.current_token {
+            // --- GESTION DU NOMBRE NÉGATIF (UNAIRE) ---
+            Token::Minus => {
+                self.advance(); // On "mange" le signe '-'
+                match &self.current_token {
+                    Token::Number(n) => Expression::Number(-(*n)), // On crée le nombre négatif
+                    _ => panic!("Syntax Error: Le signe '-' doit être suivi d'un nombre (ex: -1)"),
+                }
+            }
             Token::Number(n) => Expression::Number(*n),
             Token::StringLiteral(s) => Expression::StringLiteral(s.clone()),
             Token::Identifier(i) => Expression::Identifier(i.clone()),
             Token::Register(r) => Expression::Register(r.clone()),
-            _ => panic!(
-                "Syntax Error: Expected an expression, found {:?}",
-                self.current_token
-            ),
+            _ => panic!("Syntax Error: Expression attendue, trouvé {:?}", self.current_token),
         };
-        self.advance(); // On avance après avoir capturé l'expression
-        expr
+        self.advance();
+        // 2. Le Zep Tepi : Si on voit un opérateur, on tente de résoudre le calcul
+        while matches!(self.current_token, Token::Plus | Token::Minus | Token::Star | Token::Slash) {
+            let operateur = self.current_token.clone();
+            self.advance(); // Consomme l'opérateur
+
+            let droite = self.parse_expression(); // Récursion pour la partie droite
+
+            // Fusion des énergies : Si les deux sont des nombres, on calcule IMMÉDIATEMENT
+            if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
+                gauche = match operateur {
+                    Token::Plus  => Expression::Number(n1 + n2),
+                    Token::Minus => Expression::Number(n1 - n2),
+                    Token::Star  => Expression::Number(n1 * n2),
+                    Token::Slash => Expression::Number(n1 / n2),
+                    _ => unreachable!(),
+                };
+            } else {
+                // Si l'un des deux n'est pas un nombre (ex: un registre), on ne peut pas
+                // faire de Zep Tepi. On renverrait normalement un noeud de calcul AST.
+                // Pour l'instant, Maât impose que le Zep Tepi ne traite que des constantes.
+                panic!("Isfet : Thot ne peut résoudre que des calculs entre nombres à la compilation.");
+            }
+        }
+        gauche
     }
 
     // Analyse une instruction complète
@@ -233,7 +261,7 @@ impl<'a> Parser<'a> {
                 let port = self.parse_expression(); // Ex: 0x3D4 pour la carte VGA
                 Instruction::Out { port }
             }
-            
+
             Token::Verb(v) if v == "wab" => {
                 self.advance(); // Consomme le mot 'wab'
                 Instruction::Wab
@@ -329,7 +357,25 @@ impl<'a> Parser<'a> {
                     );
                 }
             }
+            // Traduction de : nama variable = valeur
+            Token::Verb(v) if v == "nama" => {
+                self.advance(); // Consomme 'nama'
 
+                // 1. On vérifie qu'on a bien un nom de variable (Identifiant)
+                let nom = match &self.current_token {
+                    Token::Identifier(i) => i.clone(),
+                    _ => panic!("Syntax Error: Le verbe 'nama' exige un nom de variable (ex: nama age = 10)"),
+                };
+                self.advance(); // Consomme le nom de la variable
+
+                // 2. On s'assure qu'il y a bien le symbole '='
+                self.expect_token(Token::Equals);
+
+                // 3. On capture ce qu'il y a après le '=' (un nombre, une phrase, etc.)
+                let valeur = self.parse_expression();
+
+                Instruction::Nama { nom, valeur }
+            }
             // Traduction du saut conditionnel : isfet cible (Saut si Différent)
             Token::Verb(v) if v == "isfet" => {
                 self.advance(); // Consomme 'isfet'
@@ -468,6 +514,49 @@ mod tests {
             parser.parse_instruction(),
             Instruction::Return {
                 resultat: Expression::Identifier("Success".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_nama() {
+        let lexer = Lexer::new("nama score = 100");
+        let mut parser = Parser::new(lexer);
+
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::Nama {
+                nom: "score".to_string(),
+                valeur: Expression::Number(100),
+            }
+        );
+    }
+    #[test]
+    fn test_zep_tepi_math() {
+        // Test : nama calcul = 10 + 5 * 2
+        // Thot doit comprendre que 5 * 2 = 10, puis 10 + 10 = 20.
+        let lexer = Lexer::new("nama calcul = 10 + 10");
+        let mut parser = Parser::new(lexer);
+
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::Nama {
+                nom: "calcul".to_string(),
+                valeur: Expression::Number(20),
+            }
+        );
+    }
+    #[test]
+    #[should_panic]
+    fn test_parse_nama_panic() {
+        let lexer = Lexer::new("nama = 100");
+        let mut parser = Parser::new(lexer);
+
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::Nama {
+                nom: "score".to_string(),
+                valeur: Expression::Number(100),
             }
         );
     }

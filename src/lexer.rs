@@ -19,7 +19,11 @@ pub enum Token {
     Dot,        // .
     OpenParen,  // (
     CloseParen, // )
-
+    Equals,
+    Plus,  // +
+    Minus, // -
+    Star,  // *
+    Slash, // /
     // End of File
     Eof,
     OpenBracket,
@@ -60,6 +64,19 @@ impl<'a> Lexer<'a> {
 
         // 3. Classify the character
         match c {
+            '=' => Token::Equals,
+            '+' => Token::Plus,
+            '-' => {
+                // On vérifie s'il s'agit d'un nombre négatif ou de l'opérateur Moins
+                if let Some(&next_char) = self.input.peek() {
+                    if next_char.is_digit(10) {
+                        // ... garde ici ton ancienne logique pour les nombres négatifs
+                    }
+                }
+                Token::Minus
+            }
+            '*' => Token::Star,
+            '/' => Token::Slash,
             ';' => {
                 // C'est un Murmure ! On ignore tout jusqu'à la fin de la ligne.
                 while let Some(&next_char) = self.input.peek() {
@@ -105,23 +122,6 @@ impl<'a> Lexer<'a> {
                 }
                 Token::Register(name)
             }
-            // Si c'est un signe moins -> C'est un Nombre négatif
-            '-' => {
-                let mut number_str = String::from("-");
-                while let Some(&next_char) = self.input.peek() {
-                    if next_char.is_digit(10) {
-                        number_str.push(self.input.next().unwrap());
-                    } else {
-                        break;
-                    }
-                }
-                if number_str == "-" {
-                    panic!("Erreur fatale : Un signe '-' doit être suivi d'un chiffre.");
-                }
-                Token::Number(number_str.parse::<i32>().unwrap())
-            }
-            // Dans src/lexer.rs
-
             // If it's a digit -> It's a Number (Decimal or Hexadecimal)
             '0'..='9' => {
                 let mut is_hex = false;
@@ -180,7 +180,7 @@ impl<'a> Lexer<'a> {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
                     | "kheb" | "henet" | "mer" | "her" | "kher" | "her_ankh" | "kher_ankh"
-                    | "dema" | "push" | "pop" | "in" | "out" => Token::Verb(word),
+                    | "dema" | "push" | "pop" | "in" | "out" | "nama" => Token::Verb(word),
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(lexer.next_token(), Token::Number(255)); // 0xFF = 255
 
         assert_eq!(lexer.next_token(), Token::Eof);
-    }   
+    }
 
     #[test]
     fn test_string_literal() {
