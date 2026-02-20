@@ -59,7 +59,76 @@ impl Emitter {
                         }
                     }
                 }
-
+                Instruction::Push { cible } => {
+                    match cible {
+                        Expression::Register(r) => {
+                            code_machine.push(0x66); // Protection 32-bit
+                            // L'OpCode PUSH registre commence à 0x50
+                            let opcode = 0x50
+                                + match r.as_str() {
+                                    "ka" => 0x00,
+                                    "ib" => 0x01,
+                                    "da" => 0x02,
+                                    "ba" => 0x03,
+                                    "si" => 0x06,
+                                    "di" => 0x07,
+                                    _ => panic!("Registre inconnu pour push : {}", r),
+                                };
+                            code_machine.push(opcode);
+                        }
+                        Expression::Number(n) => {
+                            code_machine.push(0x66); // Protection 32-bit
+                            code_machine.push(0x68); // OpCode PUSH imm32
+                            code_machine.extend_from_slice(&n.to_le_bytes());
+                        }
+                        _ => panic!("Push ne supporte que les registres et les nombres."),
+                    }
+                }
+                Instruction::Pop { destination } => {
+                    code_machine.push(0x66); // Protection 32-bit
+                    // L'OpCode POP registre commence à 0x58
+                    let opcode = 0x58
+                        + match destination.as_str() {
+                            "ka" => 0x00,
+                            "ib" => 0x01,
+                            "da" => 0x02,
+                            "ba" => 0x03,
+                            "si" => 0x06,
+                            "di" => 0x07,
+                            _ => panic!("Registre inconnu pour pop : {}", destination),
+                        };
+                    code_machine.push(opcode);
+                }
+                Instruction::In { port } => {
+                    // Lecture matérielle (toujours vers AL - 8 bits)
+                    match port {
+                        Expression::Number(n) => {
+                            // IN AL, imm8 (Lit le port direct)
+                            code_machine.push(0xE4);
+                            code_machine.push(*n as u8);
+                        }
+                        Expression::Register(r) if r == "da" => {
+                            // IN AL, DX (Lit le port contenu dans %da)
+                            code_machine.push(0xEC);
+                        }
+                        _ => panic!("Le port IN doit être un nombre ou le registre %da"),
+                    }
+                }
+                Instruction::Out { port } => {
+                    // Écriture matérielle (toujours depuis AL - 8 bits)
+                    match port {
+                        Expression::Number(n) => {
+                            // OUT imm8, AL (Écrit vers le port direct)
+                            code_machine.push(0xE6);
+                            code_machine.push(*n as u8);
+                        }
+                        Expression::Register(r) if r == "da" => {
+                            // OUT DX, AL (Écrit vers le port contenu dans %da)
+                            code_machine.push(0xEE);
+                        }
+                        _ => panic!("Le port OUT doit être un nombre ou le registre %da"),
+                    }
+                }
                 Instruction::Her { cible } => {
                     code_machine.push(0x0F);
                     code_machine.push(0x8F); // OpCode pour JG (Saut si plus grand)
@@ -406,7 +475,7 @@ impl Emitter {
 
                     // On laisse 2 octets vides pour la distance
                     code_machine.extend_from_slice(&[0x00, 0x00]);
-                },
+                }
                 Instruction::Dema { chemin } => {
                     panic!(
                         "Erreur fatale de Maât : L'Émetteur a trouvé une instruction 'dema' pointant vers '{}'. Le Tisserand a oublié de fusionner cette tablette avant la génération du binaire !",
@@ -441,6 +510,34 @@ impl Emitter {
 mod tests {
     use super::*;
     use crate::ast::{Expression, Instruction};
+
+    #[test]
+    fn test_generer_binaire_push_pop() {
+        let ast = vec![
+            Instruction::Push { cible: Expression::Register("ka".to_string()) },
+            Instruction::Pop { destination: "ib".to_string() }
+        ];
+        let emetteur = Emitter::new(ast, "qwerty".to_string());
+        let binaire = emetteur.generer_binaire();
+
+        // PUSH %ka (EAX) -> 0x66 (Protection 32-bit), 0x50
+        // POP %ib (ECX)  -> 0x66 (Protection 32-bit), 0x59
+        assert_eq!(binaire, vec![0x66, 0x50, 0x66, 0x59]);
+    }
+
+    #[test]
+    fn test_generer_binaire_in_out() {
+        let ast = vec![
+            Instruction::In { port: Expression::Number(96) },
+            Instruction::Out { port: Expression::Register("da".to_string()) }
+        ];
+        let emetteur = Emitter::new(ast, "qwerty".to_string());
+        let binaire = emetteur.generer_binaire();
+
+        // IN 96 (Lit depuis le port 0x60 vers AL) -> 0xE4, 0x60
+        // OUT %da (Écrit AL vers le port contenu dans DX) -> 0xEE
+        assert_eq!(binaire, vec![0xE4, 0x60, 0xEE]);
+    }
     #[test]
     fn test_generer_binaire_henek() {
         let ast = vec![Instruction::Henek {
@@ -495,4 +592,7 @@ mod tests {
         // 0x66 (Prefix) 0x81 0xF9 (CMP ECX) 00 00 00 00 (Valeur)
         assert_eq!(binaire, vec![0x66, 0x81, 0xF9, 0x00, 0x00, 0x00, 0x00]);
     }
+
+
+
 }

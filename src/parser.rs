@@ -207,6 +207,33 @@ impl<'a> Parser<'a> {
                 };
                 Instruction::Duat { phrase, adresse }
             }
+            // Dans src/parser.rs, dans parse_instruction
+
+            Token::Verb(v) if v == "push" => {
+                self.advance();
+                let cible = self.parse_expression();
+                Instruction::Push { cible }
+            }
+            Token::Verb(v) if v == "pop" => {
+                self.advance();
+                let destination = match &self.current_token {
+                    Token::Register(r) => r.clone(),
+                    _ => panic!("Syntax Error: 'pop' exige un registre"),
+                };
+                self.advance();
+                Instruction::Pop { destination }
+            }
+            Token::Verb(v) if v == "in" => {
+                self.advance();
+                let port = self.parse_expression(); // Ex: 0x60 pour le clavier
+                Instruction::In { port }
+            }
+            Token::Verb(v) if v == "out" => {
+                self.advance();
+                let port = self.parse_expression(); // Ex: 0x3D4 pour la carte VGA
+                Instruction::Out { port }
+            }
+            
             Token::Verb(v) if v == "wab" => {
                 self.advance(); // Consomme le mot 'wab'
                 Instruction::Wab
@@ -371,7 +398,39 @@ mod tests {
             }
         );
     }
+    #[test]
+    fn test_parse_push_pop() {
+        let lexer = Lexer::new("push %ka");
+        let mut parser = Parser::new(lexer);
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::Push { cible: Expression::Register("ka".to_string()) }
+        );
 
+        let lexer2 = Lexer::new("pop %ib");
+        let mut parser2 = Parser::new(lexer2);
+        assert_eq!(
+            parser2.parse_instruction(),
+            Instruction::Pop { destination: "ib".to_string() }
+        );
+    }
+
+    #[test]
+    fn test_parse_in_out() {
+        let lexer = Lexer::new("in 96");
+        let mut parser = Parser::new(lexer);
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::In { port: Expression::Number(96) }
+        );
+
+        let lexer2 = Lexer::new("out %da");
+        let mut parser2 = Parser::new(lexer2);
+        assert_eq!(
+            parser2.parse_instruction(),
+            Instruction::Out { port: Expression::Register("da".to_string()) }
+        );
+    }
     #[test]
     fn test_parse_sema() {
         let lexer = Lexer::new("sema %ka, -1");

@@ -149,7 +149,7 @@ impl<'a> Lexer<'a> {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
                     | "kheb" | "henet" | "mer" | "her" | "kher" | "her_ankh" | "kher_ankh"
-                    | "dema" => Token::Verb(word),
+                    | "dema" | "push" | "pop" | "in" | "out" => Token::Verb(word),
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }
@@ -164,7 +164,29 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_nouveaux_verbes_materiels() {
+        // Test : Est-ce que Thot lit correctement les accès matériels et la pile ?
+        let mut lexer = Lexer::new("push %ka \n pop %ib \n in 96 \n out %da");
 
+        // push %ka
+        assert_eq!(lexer.next_token(), Token::Verb("push".to_string()));
+        assert_eq!(lexer.next_token(), Token::Register("ka".to_string()));
+
+        // pop %ib
+        assert_eq!(lexer.next_token(), Token::Verb("pop".to_string()));
+        assert_eq!(lexer.next_token(), Token::Register("ib".to_string()));
+
+        // in 96 (96 est l'équivalent décimal du port 0x60 pour le clavier)
+        assert_eq!(lexer.next_token(), Token::Verb("in".to_string()));
+        assert_eq!(lexer.next_token(), Token::Number(96));
+
+        // out %da
+        assert_eq!(lexer.next_token(), Token::Verb("out".to_string()));
+        assert_eq!(lexer.next_token(), Token::Register("da".to_string()));
+
+        assert_eq!(lexer.next_token(), Token::Eof);
+    }
     #[test]
     fn test_basic_instruction() {
         // Test : Est-ce que Thot lit correctement une offrande simple ?

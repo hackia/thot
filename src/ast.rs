@@ -10,6 +10,27 @@ pub enum Expression {
 // Les Instructions pures (La Loi)
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
+    // Dans src/ast.rs, ajoute ces variantes dans l'enum Instruction
+
+    // push %registre ou push nombre
+    Push {
+        cible: Expression,
+    },
+
+    // pop %registre
+    Pop {
+        destination: String,
+    },
+
+    // in port (Lit un octet depuis un port matériel vers %ka)
+    In {
+        port: Expression,
+    },
+
+    // out port (Écrit l'octet de %ka vers un port matériel)
+    Out {
+        port: Expression,
+    },
     // henek %registre, valeur
     Henek {
         destination: String,
