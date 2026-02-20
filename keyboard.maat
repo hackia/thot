@@ -1,0 +1,16 @@
+;; INTENTION : Écouter le clavier en contact direct avec le métal (Pilote PS/2)
+lire_clavier_brut:
+attendre_touche:
+    in 0x64                 ; 1. Interroge le Gardien (Port d'état)
+    henet %ka, 1            ; 2. Masque pour isoler le bit de disponibilité
+
+    wdj %ka, 1              ; 3. La Balance : Une touche a-t-elle été touchée ?
+    isfet attendre_touche   ; 4. Si non (0), on boucle à l'infini.
+
+    in 0x60                 ; 5. Harmonie atteinte : On lit le Scancode brut dans %ka
+
+    ; --- LE BOUCLIER CONTRE LE RELÂCHEMENT (NOUVEAU) ---
+    wdj %ka, 127            ; On compare le Scancode à 127
+    her attendre_touche     ; Si %ka > 127 (Saut JG), c'est un relâchement. On l'ignore et on boucle !
+
+    return %ka              ; 6. On retourne l'énergie pure de la frappe

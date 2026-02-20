@@ -173,6 +173,60 @@ impl Emitter {
                         _ => panic!("Le Scribe ne sait pointer qu'avec %ba ou une adresse fixe."),
                     }
                 }
+                // Traduction de : sema %registre, valeur (ADD)
+                Instruction::Sema {
+                    destination,
+                    valeur,
+                } => {
+                    code_machine.push(0x66); // Stabilisation 32 bits
+
+                    match valeur {
+                        Expression::Number(n) => {
+                            // MODE 1 : Additionner un Nombre (ADD r/m32, imm32)
+                            code_machine.push(0x81); // Opcode ADD
+                            let modrm: u8 = match destination.as_str() {
+                                "ka" => 0xC0,
+                                "ib" => 0xC1,
+                                "da" => 0xC2,
+                                "ba" => 0xC3,
+                                "si" => 0xC6,
+                                "di" => 0xC7,
+                                _ => panic!("Registre inconnu pour sema : {}", destination),
+                            };
+                            code_machine.push(modrm);
+                            code_machine.extend_from_slice(&n.to_le_bytes());
+                        }
+                        Expression::Register(src) => {
+                            // MODE 2 : Additionner un Registre (ADD r/m32, reg32)
+                            code_machine.push(0x01); // Opcode ADD registre à registre
+
+                            // On récupère le code numérique des deux registres (0 à 7)
+                            let dest_code = match destination.as_str() {
+                                "ka" => 0,
+                                "ib" => 1,
+                                "da" => 2,
+                                "ba" => 3,
+                                "si" => 6,
+                                "di" => 7,
+                                _ => panic!("Registre de destination inconnu : {}", destination),
+                            };
+                            let src_code = match src.as_str() {
+                                "ka" => 0,
+                                "ib" => 1,
+                                "da" => 2,
+                                "ba" => 3,
+                                "si" => 6,
+                                "di" => 7,
+                                _ => panic!("Registre source inconnu : {}", src),
+                            };
+
+                            // Formule x86 magique (ModR/M) : 0xC0 (11000000 en binaire) + (source * 8) + destination
+                            let modrm = 0xC0 | (src_code << 3) | dest_code;
+                            code_machine.push(modrm);
+                        }
+                        _ => panic!("Sema ne supporte que les nombres ou les registres."),
+                    }
+                }
                 Instruction::Sena {
                     destination,
                     adresse,
@@ -334,64 +388,59 @@ impl Emitter {
                     code_machine.push(0x00);
                     code_machine.push(0x00);
                 }
-                // Traduction de : sema %registre, valeur (ADD reg32, imm32)
-                Instruction::Sema {
-                    destination,
-                    valeur,
-                } => {
-                    code_machine.push(0x66); // Stabilisation 32 bits
-                    code_machine.push(0x81); // Opcode ADD
-
-                    // Extension /0 pour l'addition (C0, C1, C2...)
-                    let modrm: u8 = match destination.as_str() {
-                        "ka" => 0xC0, // EAX
-                        "ib" => 0xC1, // ECX
-                        "da" => 0xC2, // EDX (V5)
-                        "ba" => 0xC3, // EBX
-                        "si" => 0xC6, // ESI (V5)
-                        "di" => 0xC7, // EDI (V5)
-                        _ => panic!("Registre inconnu pour sema : {}", destination),
-                    };
-                    code_machine.push(modrm);
-
-                    match valeur {
-                        Expression::Number(n) => {
-                            code_machine.extend_from_slice(&n.to_le_bytes());
-                        }
-                        _ => panic!("Sema ne supporte que les nombres pour le moment."),
-                    }
-                }
                 // Traduction de : wdj %registre, valeur (CMP AL, imm8)
                 // Traduction de : wdj %registre, valeur (CMP reg32, imm32)
                 Instruction::Wdj { left, right } => {
                     // 1. On force le mode 32 bits pour la précision
                     code_machine.push(0x66);
-
                     // 2. OpCode universel de comparaison : 0x81
-                    code_machine.push(0x81);
-
-                    // 3. On détermine le ModR/M (L'extension /7 pour CMP)
-                    let modrm: u8 = match left.as_str() {
-                        "ka" => 0xF8, // EAX
-                        "ib" => 0xF9, // ECX
-                        "da" => 0xFA, // EDX
-                        "ba" => 0xFB, // EBX
-                        "si" => 0xFE, // ESI
-                        "di" => 0xFF, // EDI
-                        _ => panic!("Registre inconnu pour la balance : {}", left),
-                    };
-                    code_machine.push(modrm);
-
-                    // 4. On écrit la valeur sur 4 octets (32 bits)
                     match right {
                         Expression::Number(n) => {
-                            let octets_valeur = n.to_le_bytes();
-                            code_machine.extend_from_slice(&octets_valeur);
+                            // MODE 1 : Comparer à un Nombre (CMP r/m32, imm32)
+                            code_machine.push(0x81); // OpCode universel avec nombre
+                            let modrm: u8 = match left.as_str() {
+                                "ka" => 0xF8,
+                                "ib" => 0xF9,
+                                "da" => 0xFA,
+                                "ba" => 0xFB,
+                                "si" => 0xFE,
+                                "di" => 0xFF,
+                                _ => panic!("Registre inconnu pour la balance : {}", left),
+                            };
+                            code_machine.push(modrm);
+                            code_machine.extend_from_slice(&n.to_le_bytes());
                         }
-                        _ => panic!("La Balance ne sait peser que des nombres pour l'instant."),
+                        Expression::Register(right_reg) => {
+                            // MODE 2 : Comparer à un autre Registre (CMP r/m32, reg32)
+                            code_machine.push(0x39); // OpCode pour CMP registre à registre
+
+                            // On récupère le code numérique des deux registres (0 à 7)
+                            let dest_code = match left.as_str() {
+                                "ka" => 0,
+                                "ib" => 1,
+                                "da" => 2,
+                                "ba" => 3,
+                                "si" => 6,
+                                "di" => 7,
+                                _ => panic!("Registre de gauche inconnu : {left}"),
+                            };
+                            let src_code = match right_reg.as_str() {
+                                "ka" => 0,
+                                "ib" => 1,
+                                "da" => 2,
+                                "ba" => 3,
+                                "si" => 6,
+                                "di" => 7,
+                                _ => panic!("Registre de droite inconnu : {right_reg}"),
+                            };
+
+                            // Formule x86 magique (ModR/M) : 0xC0 (11000000) + (source * 8) + destination
+                            let modrm = 0xC0 | (src_code << 3) | dest_code;
+                            code_machine.push(modrm);
+                        }
+                        _ => panic!("La Balance ne sait peser que des nombres ou des registres."),
                     }
                 }
-
                 // Traduction de : ankh cible (Saut Conditionnel : JE)
                 Instruction::Ankh { cible } => {
                     // OpCode pour JE near (Sauter si Égal, relatif 16-bit)
@@ -514,8 +563,12 @@ mod tests {
     #[test]
     fn test_generer_binaire_push_pop() {
         let ast = vec![
-            Instruction::Push { cible: Expression::Register("ka".to_string()) },
-            Instruction::Pop { destination: "ib".to_string() }
+            Instruction::Push {
+                cible: Expression::Register("ka".to_string()),
+            },
+            Instruction::Pop {
+                destination: "ib".to_string(),
+            },
         ];
         let emetteur = Emitter::new(ast, "qwerty".to_string());
         let binaire = emetteur.generer_binaire();
@@ -528,8 +581,12 @@ mod tests {
     #[test]
     fn test_generer_binaire_in_out() {
         let ast = vec![
-            Instruction::In { port: Expression::Number(96) },
-            Instruction::Out { port: Expression::Register("da".to_string()) }
+            Instruction::In {
+                port: Expression::Number(96),
+            },
+            Instruction::Out {
+                port: Expression::Register("da".to_string()),
+            },
         ];
         let emetteur = Emitter::new(ast, "qwerty".to_string());
         let binaire = emetteur.generer_binaire();
@@ -592,7 +649,19 @@ mod tests {
         // 0x66 (Prefix) 0x81 0xF9 (CMP ECX) 00 00 00 00 (Valeur)
         assert_eq!(binaire, vec![0x66, 0x81, 0xF9, 0x00, 0x00, 0x00, 0x00]);
     }
+    #[test]
+    fn test_generer_binaire_wdj_registres() {
+        // Test : wdj %ka, %ib -> Doit générer CMP EAX, ECX
+        let ast = vec![Instruction::Wdj {
+            left: "ka".to_string(),
+            right: Expression::Register("ib".to_string()),
+        }];
+        let emetteur = Emitter::new(ast, "qwerty".to_string());
+        let binaire = emetteur.generer_binaire();
 
-
-
+        // 0x66 = Préfixe 32 bits pour la stabilité
+        // 0x39 = OpCode pour CMP registre à registre
+        // 0xC8 = Octet ModR/M fusionnant ECX (source) et EAX (destination)
+        assert_eq!(binaire, vec![0x66, 0x39, 0xC8]);
+    }
 }

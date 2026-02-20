@@ -1,5 +1,43 @@
-dema "ecran" ;  La tablette ecran.maat contient le code de la fonction nettoyer_ecran.
-jena nettoyer_ecran     ; On invoque le rituel (CALL) qui se trouve dans la tablette ecran.maat
-loop:
-    per "Welcome to the OS!"
-    neheh loop     ; Saut inconditionnel (boucle infinie)
+; --- 1. LE SAUT D'AMORÇAGE ---
+neheh zep_tepi
+
+; --- 2. INCLUSION DES LOIS EXTERNES ---
+dema "keyboard.maat"
+
+; --- 3. LE POINT D'ENTRÉE ---
+zep_tepi:
+    wab
+
+    ; La Pierre de Rosette en RAM (à l'adresse 5000)
+    duat "??1234567890-=?  qwertyuiop[]\n?asdfghjkl;'`?\\zxcvbnm,./? *? ", 5000
+
+boucle_principale:
+    jena lire_clavier_brut          ; %ka contient le Scancode brut
+
+    ; --- L'INTERCEPTION DU RETOUR ARRIÈRE ---
+    wdj %ka, 14                     ; Pèse le Scancode : est-ce la touche Backspace (14) ?
+    ankh rituel_effacement          ; Si c'est l'Équilibre (Égal), on saute vers le rituel !
+
+    ; --- SÉCURITÉ CONTRE LE CHAOS ---
+    wdj %ka, 58
+    her boucle_principale           ; On ignore les touches au-delà de l'Espace
+
+    ; --- LA TRANSMUTATION (Lettres normales) ---
+    henek %ba, 5000
+    sema %ba, %ka
+    sena %ka, [%ba]
+    per %ka
+    neheh boucle_principale
+
+; --- LE RITUEL D'EFFACEMENT (L'Ouroboros) ---
+rituel_effacement:
+    henek %ka, 8                    ; 1. Code ASCII du Backspace
+    per %ka                         ; Recule
+
+    henek %ka, 32                   ; 2. Code ASCII de l'Espace
+    per %ka                         ; Écrase avec du vide
+
+    henek %ka, 8                    ; 3. Code ASCII du Backspace
+    per %ka                         ; Recule à nouveau
+
+    neheh boucle_principale         ; On retourne écouter le clavier
