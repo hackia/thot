@@ -17,10 +17,18 @@ impl Emitter {
     // Le grand convertisseur: AST -> Code Machine (Binaire)
     pub fn generer_binaire(&self) -> Vec<u8> {
         let mut code_machine: Vec<u8> = Vec::new();
+        let mut segment_noun: Vec<u8> = Vec::new();
+        // La Table de Correspondance : Hash -> Adresse en RAM
+        let mut dictionnaire_cas = std::collections::HashMap::new();
         let mut labels = std::collections::HashMap::new();
+        let mut donnees_persistantes: Vec<u8> = Vec::new(); // <-- Le Segment du Noun
         let mut sauts_a_patcher: Vec<(usize, Expression)> = Vec::new();
         let mut variables = std::collections::HashMap::new();
-        let mut prochaine_adresse_ram: u16 = 8192;
+        // On commence l'adressage des données après le code
+        // Pour Amentys, on peut imaginer un espace plat (SASOS)
+        // On commence notre adressage dans le Noun (ex: 0x2000)
+        let mut curseur_noun: u16 = 0x2000;
+        let mut prochaine_adresse_donnees: u16 = 0x2000;
         for instruction in &self.instructions {
             match instruction {
                 // Traduction de : henek %registre, valeur
@@ -572,57 +580,56 @@ impl Emitter {
                         chemin
                     );
                 }
-                // Traduction de : nama nom = valeur
+
                 Instruction::Nama { nom, valeur } => {
-                    // 1. ALLOCATION MÉMOIRE (Où va-t-on écrire ?)
-                    let adresse = if let Some(addr) = variables.get(&nom.clone()) {
-                        *addr // La variable existe déjà, on réutilise son adresse
+                    variables.insert(nom.clone(), prochaine_adresse_donnees);
+                    let contenu_brut = match valeur {
+                        Expression::Number(n) => n.to_le_bytes().to_vec(),
+                        Expression::StringLiteral(s) => s.as_bytes().to_vec(),
+                        _ => panic!("Contenu non hashable au Zep Tepi."),
+                    };
+                    // 2. CALCULER LE SCEAU SACRÉ (BLAKE3)
+                    let hash = blake3::hash(&contenu_brut);
+                    let adresse = if let Some(addr_existante) = dictionnaire_cas.get(&hash) {
+                        // L'objet existe déjà ! On pointe vers la même adresse physique. [cite: 15, 156]
+                        *addr_existante
                     } else {
-                        let addr = prochaine_adresse_ram;
-                        variables.insert(nom.clone(), addr);
-                        // On réserve 4 octets (32 bits) pour un nombre
-                        prochaine_adresse_ram += 4;
+                        // Nouvel objet unique, on le grave dans le segment du Noun
+                        let addr = curseur_noun;
+                        segment_noun.extend_from_slice(&contenu_brut);
+
+                        // Si c'est un texte, on n'oublie pas le zéro de fin (Signe du Silence)
+                        if let Expression::StringLiteral(_) = valeur {
+                            segment_noun.push(0x00);
+                        }
+                        // On lie le nom de la variable à cette adresse CAS
+                        dictionnaire_cas.insert(hash, addr);
+                        curseur_noun += contenu_brut.len() as u16
+                            + if let Expression::StringLiteral(_) = valeur {
+                                1
+                            } else {
+                                0
+                            };
                         addr
                     };
+                    variables.insert(nom.clone(), adresse);
 
-                    // 2. ÉCRITURE PHYSIQUE (Génération des Opcodes)
                     match valeur {
                         Expression::Number(n) => {
-                            // Étape A : On place le nombre dans l'Accumulateur %ka (EAX)
-                            code_machine.push(0x66); // Mode 32-bit
-                            code_machine.push(0xB8); // OpCode MOV EAX, imm32
-                            code_machine.extend_from_slice(&n.to_le_bytes());
-
-                            // Étape B : On sauvegarde EAX dans la RAM à l'adresse allouée
-                            // 0xA3 est l'OpCode magique pour : MOV [adresse_16_bits], EAX
-                            code_machine.push(0x66);
-                            code_machine.push(0xA3);
-                            code_machine.extend_from_slice(&adresse.to_le_bytes());
+                            // On place le nombre directement dans le segment de données
+                            donnees_persistantes.extend_from_slice(&n.to_le_bytes());
+                            prochaine_adresse_donnees += 4;
                         }
                         Expression::StringLiteral(s) => {
-                            // Si c'est une phrase (ex: nama titre = "Amentys")
-                            // On écrit lettre par lettre comme pour l'instruction 'duat'
-                            for (i, c) in s.chars().enumerate() {
-                                code_machine.push(0xC6); // MOV [imm16], imm8
-                                code_machine.push(0x06);
-                                let addr_actuelle = adresse + (i as u16);
-                                code_machine.extend_from_slice(&addr_actuelle.to_le_bytes());
-                                code_machine.push(c as u8);
-                            }
-                            // On n'oublie pas le zéro de fin (Signe du Silence)
-                            code_machine.push(0xC6);
-                            code_machine.push(0x06);
-                            let addr_zero = adresse + s.len() as u16;
-                            code_machine.extend_from_slice(&addr_zero.to_le_bytes());
-                            code_machine.push(0x00);
-                            // On met à jour l'espace total occupé par la phrase
-                            // pour que la prochaine variable ne l'écrase pas !
-                            prochaine_adresse_ram = addr_zero + 1;
+                            // On place la phrase directement, sans générer de code CPU
+                            donnees_persistantes.extend_from_slice(s.as_bytes());
+                            donnees_persistantes.push(0); // Le Signe du Silence (Null terminator)
+                            prochaine_adresse_donnees += (s.len() + 1) as u16;
                         }
-                        _ => panic!(
-                            "Le Scribe ne sait assigner que des nombres ou des phrases pour l'instant."
-                        ),
+                        _ => panic!("Seules les constantes peuvent être persistantes au Zep Tepi."),
                     }
+                    // NOTE : On ne push RIEN dans 'code_machine' !
+                    // La variable est "née" dans le binaire.
                 }
                 Instruction::Smen { .. } => {}
                 Instruction::CurrentAddress => {}
@@ -652,7 +659,9 @@ impl Emitter {
             code_machine[offset_du_trou] = bytes_distance[0];
             code_machine[offset_du_trou + 1] = bytes_distance[1];
         }
-        code_machine
+        let mut binaire_final = code_machine;
+        binaire_final.extend(donnees_persistantes);
+        binaire_final
     }
 }
 
