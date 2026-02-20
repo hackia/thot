@@ -7,6 +7,7 @@ use crate::lexer::{Lexer, Token};
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current_token: Token,
+    constantes: std::collections::HashMap<String, i32>,
 }
 
 impl<'a> Parser<'a> {
@@ -16,6 +17,7 @@ impl<'a> Parser<'a> {
         Parser {
             lexer,
             current_token: first_token,
+            constantes: std::collections::HashMap::new(),
         }
     }
 
@@ -44,51 +46,78 @@ impl<'a> Parser<'a> {
             );
         }
     }
-
+    // Niveau 1 : Gère l'addition et la soustraction (Les opérations "lentes")
     fn parse_expression(&mut self) -> Expression {
-        // 1. On capture la première partie (Valeur positive ou négative)
+        let mut gauche = self.parse_terme(); // On commence par chercher les multiplications
+
+        while matches!(self.current_token, Token::Plus | Token::Minus) {
+            let operateur = self.current_token.clone();
+            self.advance();
+            let droite = self.parse_terme(); // Priorité aux multiplications à droite aussi
+
+            if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
+                gauche = match operateur {
+                    Token::Plus => Expression::Number(n1 + n2),
+                    Token::Minus => Expression::Number(n1 - n2),
+                    _ => unreachable!(),
+                };
+            } else {
+                panic!("Isfet : Thot ne résout que des constantes pour le moment.");
+            }
+        }
+
+        gauche
+    }
+
+    // Niveau 2 : Gère la multiplication et la division (Les opérations "rapides")
+    fn parse_terme(&mut self) -> Expression {
         let mut gauche = match &self.current_token {
-            // --- GESTION DU NOMBRE NÉGATIF (UNAIRE) ---
             Token::Minus => {
-                self.advance(); // On "mange" le signe '-'
+                // Gestion du nombre négatif
+                self.advance();
                 match &self.current_token {
-                    Token::Number(n) => Expression::Number(-(*n)), // On crée le nombre négatif
-                    _ => panic!("Syntax Error: Le signe '-' doit être suivi d'un nombre (ex: -1)"),
+                    Token::Number(n) => Expression::Number(-(*n)),
+                    _ => panic!("Syntax Error: '-' attend un nombre"),
+                }
+            }
+            // 3. Dans parse_terme ou parse_expression, substitue les noms par leur valeur
+            Token::Identifier(nom) => {
+                if let Some(&val) = self.constantes.get(nom) {
+                    Expression::Number(val) // Si c'est une constante smen, on renvoie son nombre !
+                } else {
+                    Expression::Identifier(nom.clone()) // Sinon c'est une variable nama
                 }
             }
             Token::Number(n) => Expression::Number(*n),
             Token::StringLiteral(s) => Expression::StringLiteral(s.clone()),
-            Token::Identifier(i) => Expression::Identifier(i.clone()),
             Token::Register(r) => Expression::Register(r.clone()),
-            _ => panic!("Syntax Error: Expression attendue, trouvé {:?}", self.current_token),
+            _ => panic!(
+                "Syntax Error: Expression attendue, trouvé {:?}",
+                self.current_token
+            ),
         };
         self.advance();
-        // 2. Le Zep Tepi : Si on voit un opérateur, on tente de résoudre le calcul
-        while matches!(self.current_token, Token::Plus | Token::Minus | Token::Star | Token::Slash) {
+
+        while matches!(self.current_token, Token::Star | Token::Slash) {
             let operateur = self.current_token.clone();
-            self.advance(); // Consomme l'opérateur
+            self.advance();
+            // Pour la multiplication, on ne regarde que les valeurs immédiates (pas d'addition ici)
+            let droite = match &self.current_token {
+                Token::Number(n) => Expression::Number(*n),
+                _ => panic!("Syntax Error: Opérateur '*' attend un nombre à droite"),
+            };
+            self.advance();
 
-            let droite = self.parse_expression(); // Récursion pour la partie droite
-
-            // Fusion des énergies : Si les deux sont des nombres, on calcule IMMÉDIATEMENT
             if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
                 gauche = match operateur {
-                    Token::Plus  => Expression::Number(n1 + n2),
-                    Token::Minus => Expression::Number(n1 - n2),
-                    Token::Star  => Expression::Number(n1 * n2),
+                    Token::Star => Expression::Number(n1 * n2),
                     Token::Slash => Expression::Number(n1 / n2),
                     _ => unreachable!(),
                 };
-            } else {
-                // Si l'un des deux n'est pas un nombre (ex: un registre), on ne peut pas
-                // faire de Zep Tepi. On renverrait normalement un noeud de calcul AST.
-                // Pour l'instant, Maât impose que le Zep Tepi ne traite que des constantes.
-                panic!("Isfet : Thot ne peut résoudre que des calculs entre nombres à la compilation.");
             }
         }
         gauche
     }
-
     // Analyse une instruction complète
     pub fn parse_instruction(&mut self) -> Instruction {
         match self.current_token() {
@@ -109,6 +138,22 @@ impl<'a> Parser<'a> {
                 Instruction::Henek {
                     destination,
                     valeur,
+                }
+            }
+            Token::Verb(v) if v == "smen" => {
+                self.advance();
+                let nom = match &self.current_token {
+                    Token::Identifier(n) => n.clone(),
+                    _ => panic!("Smen exige un nom"),
+                };
+                self.advance();
+                self.expect_token(Token::Equals);
+                let valeur_expr = self.parse_expression();
+                if let Expression::Number(n) = valeur_expr {
+                    self.constantes.insert(nom.clone(), n); // On mémorise la constante !
+                    Instruction::Smen { nom, valeur: n }
+                } else {
+                    panic!("Smen exige une valeur numérique fixe (Zep Tepi)");
                 }
             }
             Token::Verb(v) if v == "kheper" => {
@@ -173,7 +218,9 @@ impl<'a> Parser<'a> {
                 self.advance(); // Consomme 'dema'
                 let chemin = match self.parse_expression() {
                     Expression::StringLiteral(s) => s,
-                    _ => panic!("Syntax Error: 'dema' attend le chemin du parchemin entre guillemets"),
+                    _ => panic!(
+                        "Syntax Error: 'dema' attend le chemin du parchemin entre guillemets"
+                    ),
                 };
                 Instruction::Dema { chemin }
             }
@@ -236,7 +283,6 @@ impl<'a> Parser<'a> {
                 Instruction::Duat { phrase, adresse }
             }
             // Dans src/parser.rs, dans parse_instruction
-
             Token::Verb(v) if v == "push" => {
                 self.advance();
                 let cible = self.parse_expression();
@@ -364,7 +410,9 @@ impl<'a> Parser<'a> {
                 // 1. On vérifie qu'on a bien un nom de variable (Identifiant)
                 let nom = match &self.current_token {
                     Token::Identifier(i) => i.clone(),
-                    _ => panic!("Syntax Error: Le verbe 'nama' exige un nom de variable (ex: nama age = 10)"),
+                    _ => panic!(
+                        "Syntax Error: Le verbe 'nama' exige un nom de variable (ex: nama age = 10)"
+                    ),
                 };
                 self.advance(); // Consomme le nom de la variable
 
@@ -450,31 +498,67 @@ mod tests {
         let mut parser = Parser::new(lexer);
         assert_eq!(
             parser.parse_instruction(),
-            Instruction::Push { cible: Expression::Register("ka".to_string()) }
+            Instruction::Push {
+                cible: Expression::Register("ka".to_string())
+            }
         );
 
         let lexer2 = Lexer::new("pop %ib");
         let mut parser2 = Parser::new(lexer2);
         assert_eq!(
             parser2.parse_instruction(),
-            Instruction::Pop { destination: "ib".to_string() }
+            Instruction::Pop {
+                destination: "ib".to_string()
+            }
+        );
+    }
+    #[test]
+    fn test_priorite_math_comptime() {
+        // Test : 10 + 5 * 2 doit donner 20 (et non 30)
+        let lexer = Lexer::new("nama resultat = 10 + 5 * 2");
+        let mut parser = Parser::new(lexer);
+
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::Nama {
+                nom: "resultat".to_string(),
+                valeur: Expression::Number(20), // 10 + (5 * 2)
+            }
         );
     }
 
+    #[test]
+    fn test_substitution_smen() {
+        // On simule une constante déjà apprise par Thot
+        let mut parser = Parser::new(Lexer::new("henek %ka, LARGEUR"));
+        parser.constantes.insert("LARGEUR".to_string(), 80);
+
+        assert_eq!(
+            parser.parse_instruction(),
+            Instruction::Henek {
+                destination: "ka".to_string(),
+                valeur: Expression::Number(80), // LARGEUR a été remplacé par 80
+            }
+        );
+    }
     #[test]
     fn test_parse_in_out() {
         let lexer = Lexer::new("in 96");
         let mut parser = Parser::new(lexer);
         assert_eq!(
             parser.parse_instruction(),
-            Instruction::In { port: Expression::Number(96) }
+            Instruction::In {
+                port: Expression::Number(96)
+            }
         );
 
         let lexer2 = Lexer::new("out %da");
         let mut parser2 = Parser::new(lexer2);
         assert_eq!(
             parser2.parse_instruction(),
-            Instruction::Out { port: Expression::Register("da".to_string()) }
+            Instruction::Out {
+                port: Expression::Register("da".to_string())
+            }
         );
     }
     #[test]

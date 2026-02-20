@@ -30,7 +30,11 @@ pub enum Instruction {
     In {
         port: Expression,
     },
-
+    // smen NOM = VALEUR (Constante de compilation)
+    Smen {
+        nom: String,
+        valeur: i32,
+    },
     // out port (Écrit l'octet de %ka vers un port matériel)
     Out {
         port: Expression,

@@ -180,21 +180,34 @@ impl<'a> Lexer<'a> {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
                     | "kheb" | "henet" | "mer" | "her" | "kher" | "her_ankh" | "kher_ankh"
-                    | "dema" | "push" | "pop" | "in" | "out" | "nama" => Token::Verb(word),
+                    | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen" => Token::Verb(word),
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }
-
             _ => panic!("Thot encountered an unknown character: {c}"),
         }
     }
 }
-// Fichier : src/lexer.rs
-// (À placer tout en bas du fichier, après l'implémentation du Lexer)
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_lexer_math_et_smen() {
+        let mut lexer = Lexer::new("smen X = 10 + 5 * 2 / 1");
+
+        assert_eq!(lexer.next_token(), Token::Verb("smen".to_string()));
+        assert_eq!(lexer.next_token(), Token::Identifier("X".to_string()));
+        assert_eq!(lexer.next_token(), Token::Equals);
+        assert_eq!(lexer.next_token(), Token::Number(10));
+        assert_eq!(lexer.next_token(), Token::Plus);
+        assert_eq!(lexer.next_token(), Token::Number(5));
+        assert_eq!(lexer.next_token(), Token::Star);
+        assert_eq!(lexer.next_token(), Token::Number(2));
+        assert_eq!(lexer.next_token(), Token::Slash);
+        assert_eq!(lexer.next_token(), Token::Number(1));
+    }
+
     #[test]
     fn test_nouveaux_verbes_materiels() {
         // Test : Est-ce que Thot lit correctement les accès matériels et la pile ?

@@ -54,13 +54,18 @@ impl Emitter {
                         }
                         Expression::Identifier(nom) => {
                             // NOUVEAU : Thot cherche l'adresse de la variable dans son Registre
-                            let adresse = *variables.get(nom).expect(&format!("Erreur fatale : La variable '{}' n'existe pas !", nom));
+                            let adresse = *variables.get(nom).expect(&format!(
+                                "Erreur fatale : La variable '{}' n'existe pas !",
+                                nom
+                            ));
 
                             // On convertit l'adresse (u16) en 32 bits (u32) pour remplir le registre
                             let octets_valeur = (adresse as u32).to_le_bytes();
                             code_machine.extend_from_slice(&octets_valeur);
                         }
-                        _ => panic!("L'Émetteur ne sait gérer que des nombres purs ou des noms de variables connus pour l'instant."),
+                        _ => panic!(
+                            "L'Émetteur ne sait gérer que des nombres purs ou des noms de variables connus pour l'instant."
+                        ),
                     }
                 }
                 Instruction::Push { cible } => {
@@ -172,11 +177,15 @@ impl Emitter {
                         }
                         Expression::Identifier(nom) => {
                             // NOUVEAU : Sauvegarde directe dans la variable
-                            let adresse = *variables.get(nom).expect(&format!("Erreur : Variable '{}' introuvable", nom));
+                            let adresse = *variables
+                                .get(nom)
+                                .expect(&format!("Erreur : Variable '{}' introuvable", nom));
                             code_machine.push(0xA2); // OpCode MOV [moffs8], AL
                             code_machine.extend_from_slice(&(adresse as u16).to_le_bytes());
                         }
-                        _ => panic!("Le Scribe ne sait pointer qu'avec %ba, une adresse fixe, ou une variable."),
+                        _ => panic!(
+                            "Le Scribe ne sait pointer qu'avec %ba, une adresse fixe, ou une variable."
+                        ),
                     }
                 }
                 // Traduction de : sema %registre, valeur (ADD)
@@ -250,11 +259,15 @@ impl Emitter {
                         }
                         Expression::Identifier(nom) => {
                             // NOUVEAU : Lecture directe depuis la variable
-                            let adresse = *variables.get(nom).expect(&format!("Erreur : Variable '{}' introuvable", nom));
+                            let adresse = *variables
+                                .get(nom)
+                                .expect(&format!("Erreur : Variable '{}' introuvable", nom));
                             code_machine.push(0xA0); // OpCode MOV AL, [moffs8]
                             code_machine.extend_from_slice(&(adresse as u16).to_le_bytes());
                         }
-                        _ => panic!("Le Scribe ne sait lire la RAM qu'avec %ba, une adresse fixe, ou une variable."),
+                        _ => panic!(
+                            "Le Scribe ne sait lire la RAM qu'avec %ba, une adresse fixe, ou une variable."
+                        ),
                     }
                 }
                 Instruction::Sedjem { destination } => {
@@ -582,18 +595,20 @@ impl Emitter {
                             // pour que la prochaine variable ne l'écrase pas !
                             prochaine_adresse_ram = addr_zero + 1;
                         }
-                        _ => panic!("Le Scribe ne sait assigner que des nombres ou des phrases pour l'instant."),
+                        _ => panic!(
+                            "Le Scribe ne sait assigner que des nombres ou des phrases pour l'instant."
+                        ),
                     }
                 }
+                Instruction::Smen { .. } => {}
             }
         }
         // --- LA PASSE DE PATCH (Résolution des Sauts) ---
         for (offset_du_trou, cible) in sauts_a_patcher {
             // On cherche où se trouve vraiment l'étiquette
-            let adresse_cible = labels.get(&cible).expect(&format!(
-                "Erreur fatale : Étiquette '{}' introuvable",
-                cible
-            ));
+            let adresse_cible = labels
+                .get(&cible)
+                .expect(&format!("Erreur fatale : Étiquette '{cible}' introuvable",));
 
             // Le processeur calcule la distance à partir de l'octet *suivant* l'instruction complète (offset + 2)
             let distance = (*adresse_cible as isize) - ((offset_du_trou + 2) as isize);
@@ -631,7 +646,18 @@ mod tests {
         // POP %ib (ECX)  -> 0x66 (Protection 32-bit), 0x59
         assert_eq!(binaire, vec![0x66, 0x50, 0x66, 0x59]);
     }
+    #[test]
+    fn test_emitter_smen_est_silencieux() {
+        let ast = vec![Instruction::Smen {
+            nom: "X".to_string(),
+            valeur: 100
+        }];
+        let emetteur = Emitter::new(ast, "qwerty".to_string());
+        let binaire = emetteur.generer_binaire();
 
+        // Une constante ne doit produire aucun code machine x86
+        assert!(binaire.is_empty());
+    }
     #[test]
     fn test_generer_binaire_in_out() {
         let ast = vec![

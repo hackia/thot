@@ -61,6 +61,7 @@ pub fn tisser_tablettes(
 
     for instruction in instructions_brutes {
         match instruction {
+            Instruction::Smen { .. } => instructions_finales.push(instruction),
             Instruction::Dema { chemin } => {
                 // 1. On trouve le chemin absolu du nouveau fichier
                 let mut chemin_complet = dossier_courant.join(&chemin);
@@ -123,8 +124,6 @@ fn main() {
             while parser.not_eof() {
                 instructions.push(parser.parse_instruction());
             }
-            // ------------------------------
-
             // On récupère le dossier du fichier principal pour gérer les chemins relatifs
             let chemin_fichier_principal = Path::new(file);
             let dossier_principal = chemin_fichier_principal.parent().unwrap_or(Path::new(""));
