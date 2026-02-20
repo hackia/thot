@@ -15,7 +15,7 @@ pub enum Instruction {
         nom: String,
         valeur: Expression,
     },
-
+    Rdtsc, // Lit le compteur de cycles CPU
     // push %registre ou push nombre
     Push {
         cible: Expression,

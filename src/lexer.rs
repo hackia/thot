@@ -180,7 +180,9 @@ impl<'a> Lexer<'a> {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
                     | "kheb" | "henet" | "mer" | "her" | "kher" | "her_ankh" | "kher_ankh"
-                    | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen" => Token::Verb(word),
+                    | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen" | "rdtsc" => {
+                        Token::Verb(word)
+                    }
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }

@@ -188,6 +188,10 @@ impl Emitter {
                         ),
                     }
                 }
+                Instruction::Rdtsc => {
+                    code_machine.push(0x0F);
+                    code_machine.push(0x31);
+                }
                 // Traduction de : sema %registre, valeur (ADD)
                 Instruction::Sema {
                     destination,
@@ -650,7 +654,7 @@ mod tests {
     fn test_emitter_smen_est_silencieux() {
         let ast = vec![Instruction::Smen {
             nom: "X".to_string(),
-            valeur: 100
+            valeur: 100,
         }];
         let emetteur = Emitter::new(ast, "qwerty".to_string());
         let binaire = emetteur.generer_binaire();

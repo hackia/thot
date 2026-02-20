@@ -239,6 +239,10 @@ impl<'a> Parser<'a> {
                     _ => Instruction::KherAnkh { cible },
                 }
             }
+            Token::Verb(v) if v == "rdtsc" => {
+                self.advance();
+                Instruction::Rdtsc
+            }
             // Traduction de : henet %registre, valeur (AND)
             Token::Verb(v) if v == "henet" => {
                 self.advance();
