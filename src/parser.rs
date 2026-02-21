@@ -666,6 +666,23 @@ impl<'a> Parser<'a> {
                             "Sema for 128-bit registers only accepts Helix literals or registers."
                         ),
                     }
+                } else if dest_spec.level == Level::Xenith {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "sema",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Sema for 256-bit registers only accepts Helix literals or registers."
+                        ),
+                    }
                 } else {
                     panic!(
                         "Sema does not yet support registers beyond Extreme: %{} ({})",

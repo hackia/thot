@@ -69,6 +69,13 @@ impl Emitter {
         code.extend_from_slice(&imm.to_le_bytes());
     }
 
+    fn emit_rep_movsd_4(&self, code: &mut Vec<u8>) {
+        // MOV ECX, 4 ; CLD ; REP MOVSD (32-bit addr/data)
+        code.extend_from_slice(&[0x66, 0xB9, 0x04, 0x00, 0x00, 0x00]);
+        code.push(0xFC); // CLD
+        code.extend_from_slice(&[0x66, 0x67, 0xF3, 0xA5]);
+    }
+
     fn alloc_helix_literal(&mut self, level: Level, ra: u16, apophis: u16) -> u16 {
         if level != Level::Extreme {
             panic!("Helix literal storage is only supported for Extreme (128) right now.");
@@ -502,18 +509,51 @@ impl Emitter {
         code_actual.push(0x00);
     }
     pub fn kheper(&mut self, code_actual: &mut Vec<u8>, source: &String, adresse: &Expression) {
+        // 1. On identifie le code du registre source
+        let source_spec = parse_general_register(source);
+        let source_base = match source_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+
+        if source_spec.level == Level::Extreme {
+            // Copier 16 octets depuis l'adresse pointée par le registre source vers la RAM
+            self.emit_mov_reg_reg(code_actual, RegBase::Si, source_base);
+            match adresse {
+                Expression::Helix { ra, .. } => {
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Di, *ra as u32);
+                }
+                Expression::Number(n) => {
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Di, *n as u32);
+                }
+                Expression::Identifier(nom) => {
+                    let addr = self
+                        .variables
+                        .get(nom)
+                        .expect(&format!("Variable '{}' introuvable", nom));
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Di, *addr as u32);
+                }
+                Expression::Register(r) => {
+                    let ptr_spec = parse_general_register(r);
+                    ensure_supported_level("kheper", r, ptr_spec.level);
+                    if let RegKind::General(RegBase::Ba) = ptr_spec.kind {
+                        self.emit_mov_reg_reg(code_actual, RegBase::Di, RegBase::Ba);
+                    } else {
+                        panic!("The write address is invalid for kheper.");
+                    }
+                }
+                _ => panic!("L'adresse de destination est invalide pour kheper."),
+            }
+            self.emit_rep_movsd_4(code_actual);
+            return;
+        }
+
         // Préfixes pour le Mode Réel : 32 bits data, 16 bits addr
         code_actual.push(0x66);
         code_actual.push(0x67);
-
-        // 1. On identifie le code du registre source
-        let source_spec = parse_general_register(source);
-        let reg_code: u8 = match source_spec.kind {
-            RegKind::General(base) => reg_code(base),
-            _ => unreachable!(),
-        };
         ensure_supported_level("kheper", source, source_spec.level);
 
+        let reg_code: u8 = reg_code(source_base);
         match adresse {
             Expression::Helix { ra, .. } => {
                 code_actual.push(0x89); // ou 0x8B
@@ -536,15 +576,30 @@ impl Emitter {
     pub fn push(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
         match cible {
             Expression::Register(r) => {
-                actual_code.push(0x66); // Protection 32-bit
-                // L'OpCode PUSH registre commence à 0x50
                 let reg_spec = parse_general_register(r);
-                let opcode = 0x50
-                    + match reg_spec.kind {
-                        RegKind::General(base) => reg_code(base),
-                        _ => unreachable!(),
-                    };
-                actual_code.push(opcode);
+                let reg_base = match reg_spec.kind {
+                    RegKind::General(base) => base,
+                    _ => unreachable!(),
+                };
+                if reg_spec.level == Level::Extreme {
+                    // SUB ESP, 16
+                    actual_code.extend_from_slice(&[0x66, 0x83, 0xEC, 0x10]);
+                    // ESI = source pointer
+                    self.emit_mov_reg_reg(actual_code, RegBase::Si, reg_base);
+                    // EDI = ESP
+                    actual_code.extend_from_slice(&[0x66, 0x8B, 0xFC]);
+                    self.emit_rep_movsd_4(actual_code);
+                } else if reg_spec.level == Level::Xenith {
+                    panic!(
+                        "Push does not yet support registers beyond Extreme: %{} ({})",
+                        r, reg_spec.level
+                    );
+                } else {
+                    actual_code.push(0x66); // Protection 32-bit
+                    // L'OpCode PUSH registre commence à 0x50
+                    let opcode = 0x50 + reg_code(reg_base);
+                    actual_code.push(opcode);
+                }
             }
             Expression::Number(n) => {
                 actual_code.push(0x66); // Protection 32-bit
@@ -555,16 +610,49 @@ impl Emitter {
         }
     }
     pub fn sena(&mut self, code_actual: &mut Vec<u8>, destination: &String, adresse: &Expression) {
+        let dest_spec = parse_general_register(destination);
+        let dest_base = match dest_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+        if dest_spec.level == Level::Extreme {
+            // Copier 16 octets depuis la RAM vers l'adresse pointée par le registre destination
+            self.emit_mov_reg_reg(code_actual, RegBase::Di, dest_base);
+            match adresse {
+                Expression::Helix { ra, .. } => {
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Si, *ra as u32);
+                }
+                Expression::Number(n) => {
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Si, *n as u32);
+                }
+                Expression::Identifier(nom) => {
+                    let addr = self
+                        .variables
+                        .get(nom)
+                        .expect(&format!("Variable '{}' introuvable", nom));
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Si, *addr as u32);
+                }
+                Expression::Register(r) => {
+                    let ptr_spec = parse_general_register(r);
+                    ensure_supported_level("sena", r, ptr_spec.level);
+                    if let RegKind::General(RegBase::Ba) = ptr_spec.kind {
+                        self.emit_mov_reg_reg(code_actual, RegBase::Si, RegBase::Ba);
+                    } else {
+                        panic!("The read address is invalid for Thoth.");
+                    }
+                }
+                _ => panic!("The read address is invalid for Thoth."),
+            }
+            self.emit_rep_movsd_4(code_actual);
+            return;
+        }
+
         // On prépare le terrain : Mode 32 bits et Adressage 16 bits
         code_actual.push(0x66);
         code_actual.push(0x67);
 
         // 1. On identifie le code du registre cible
-        let dest_spec = parse_general_register(destination);
-        let reg_code: u8 = match dest_spec.kind {
-            RegKind::General(base) => reg_code(base),
-            _ => unreachable!(),
-        };
+        let reg_code: u8 = reg_code(dest_base);
         ensure_supported_level("sena", destination, dest_spec.level);
 
         match adresse {
@@ -608,15 +696,30 @@ impl Emitter {
         code_actual.extend_from_slice(&setup_disque);
     }
     pub fn pop(&mut self, actual_code: &mut Vec<u8>, destination: &String) {
-        actual_code.push(0x66); // Protection 32-bit
-        // L'OpCode POP registre commence à 0x58
         let dest_spec = parse_general_register(destination);
-        let opcode = 0x58
-            + match dest_spec.kind {
-                RegKind::General(base) => reg_code(base),
-                _ => unreachable!(),
-            };
-        actual_code.push(opcode);
+        let dest_base = match dest_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+        if dest_spec.level == Level::Extreme {
+            // ESI = ESP
+            actual_code.extend_from_slice(&[0x66, 0x8B, 0xF4]);
+            // EDI = destination pointer
+            self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+            self.emit_rep_movsd_4(actual_code);
+            // ADD ESP, 16
+            actual_code.extend_from_slice(&[0x66, 0x83, 0xC4, 0x10]);
+        } else if dest_spec.level == Level::Xenith {
+            panic!(
+                "Pop does not yet support registers beyond Extreme: %{} ({})",
+                destination, dest_spec.level
+            );
+        } else {
+            actual_code.push(0x66); // Protection 32-bit
+            // L'OpCode POP registre commence à 0x58
+            let opcode = 0x58 + reg_code(dest_base);
+            actual_code.push(opcode);
+        }
     }
     pub fn io_out(&mut self, actual_code: &mut Vec<u8>, port: &Expression) {
         // Écriture matérielle (toujours depuis AL - 8 bits)
@@ -901,6 +1004,39 @@ impl Emitter {
                     code_actual.extend_from_slice(&[0x00, 0x00]);
                 }
                 _ => panic!("Sema only supports Helix literals or registers for 128-bit."),
+            }
+        } else if dest_spec.level == Level::Xenith {
+            match value {
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("sema", destination, dest_spec.level, src, src_spec.level);
+                    self.emit_mov_reg_reg(code_actual, RegBase::Di, dest_base);
+                    self.emit_mov_reg_reg(code_actual, RegBase::Si, src_base);
+                    code_actual.push(0xE8);
+                    self.jump.push((
+                        code_actual.len(),
+                        Expression::Identifier("__xenith_add256".to_string()),
+                        self.in_kernel,
+                    ));
+                    code_actual.extend_from_slice(&[0x00, 0x00]);
+                }
+                Expression::Helix { ra, apophis } => {
+                    let addr = self.alloc_xenith_literal(*ra, *apophis);
+                    self.emit_mov_reg_reg(code_actual, RegBase::Di, dest_base);
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Si, addr as u32);
+                    code_actual.push(0xE8);
+                    self.jump.push((
+                        code_actual.len(),
+                        Expression::Identifier("__xenith_add256".to_string()),
+                        self.in_kernel,
+                    ));
+                    code_actual.extend_from_slice(&[0x00, 0x00]);
+                }
+                _ => panic!("Sema only supports Helix literals or registers for 256-bit."),
             }
         } else {
             panic!(
@@ -1294,6 +1430,51 @@ impl Emitter {
             0xC3, // RET
         ];
         stage2_code.extend_from_slice(&helix_add);
+
+        self.labels.insert(
+            "__xenith_add256".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let xenith_add = vec![
+            0x66, 0x60, // PUSHAD
+            0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
+            0x66, 0x67, 0x03, 0x06, // ADD EAX, [ESI]
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
+            0x66, 0x67, 0x13, 0x46, 0x04, // ADC EAX, [ESI+4]
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
+            0x66, 0x67, 0x13, 0x46, 0x08, // ADC EAX, [ESI+8]
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
+            0x66, 0x67, 0x13, 0x46, 0x0C, // ADC EAX, [ESI+12]
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x10, // MOV EAX, [EDI+16]
+            0x66, 0x67, 0x13, 0x46, 0x10, // ADC EAX, [ESI+16]
+            0x66, 0x67, 0x89, 0x47, 0x10, // MOV [EDI+16], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x14, // MOV EAX, [EDI+20]
+            0x66, 0x67, 0x13, 0x46, 0x14, // ADC EAX, [ESI+20]
+            0x66, 0x67, 0x89, 0x47, 0x14, // MOV [EDI+20], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x18, // MOV EAX, [EDI+24]
+            0x66, 0x67, 0x13, 0x46, 0x18, // ADC EAX, [ESI+24]
+            0x66, 0x67, 0x89, 0x47, 0x18, // MOV [EDI+24], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x1C, // MOV EAX, [EDI+28]
+            0x66, 0x67, 0x13, 0x46, 0x1C, // ADC EAX, [ESI+28]
+            0x66, 0x67, 0x89, 0x47, 0x1C, // MOV [EDI+28], EAX
+            0x73, 0x30, // JNC +48 (skip saturation)
+            0x66, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, // MOV EAX, 0xFFFFFFFF
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x66, 0x67, 0x89, 0x47, 0x10, // MOV [EDI+16], EAX
+            0x66, 0x67, 0x89, 0x47, 0x14, // MOV [EDI+20], EAX
+            0x66, 0x67, 0x89, 0x47, 0x18, // MOV [EDI+24], EAX
+            0x66, 0x67, 0x89, 0x47, 0x1C, // MOV [EDI+28], EAX
+            0x66, 0x61, // POPAD
+            0xC3, // RET
+        ];
+        stage2_code.extend_from_slice(&xenith_add);
 
         self.labels.insert(
             "__helix_sub128".to_string(),
