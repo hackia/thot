@@ -1,0 +1,388 @@
+    Checking thot v0.1.1 (/home/saigo/thot)
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+  --> src/emitter.rs:94:45
+   |
+94 | ...                   Expression::Number(n) => {
+   |                                   ^^^^^^ variant or associated item not found in `ast::Expression`
+   |
+  ::: src/ast.rs:3:1
+   |
+ 3 | pub enum Expression {
+   | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:118:37
+    |
+118 |                         Expression::Number(n) => n.to_le_bytes().to_vec(),
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:157:37
+    |
+157 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:183:37
+    |
+183 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:198:37
+    |
+198 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:253:37
+    |
+253 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:283:37
+    |
+283 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:361:37
+    |
+361 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:409:40
+    |
+409 |                     if let Expression::Number(n) = valeur {
+    |                                        ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:429:40
+    |
+429 |                     if let Expression::Number(n) = valeur {
+    |                                        ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:435:37
+    |
+435 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:495:37
+    |
+495 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/emitter.rs:578:37
+    |
+578 |                         Expression::Number(n) => {
+    |                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `lexer::Token` in the current scope
+  --> src/parser.rs:52:20
+   |
+52 |             Token::Number(n) => {
+   |                    ^^^^^^ variant or associated item not found in `lexer::Token`
+   |
+  ::: src/lexer.rs:2:1
+   |
+ 2 | pub enum Token {
+   | -------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+  --> src/parser.rs:54:29
+   |
+54 |                 Expression::Number(n)
+   |                             ^^^^^^ variant or associated item not found in `ast::Expression`
+   |
+  ::: src/ast.rs:3:1
+   |
+ 3 | pub enum Expression {
+   | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+  --> src/parser.rs:64:33
+   |
+64 |                     Expression::Number(valeur) // On substitue le nom par sa valeur
+   |                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+   |
+  ::: src/ast.rs:3:1
+   |
+ 3 | pub enum Expression {
+   | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `lexer::Token` in the current scope
+  --> src/parser.rs:80:31
+   |
+80 |                 if let Token::Number(n) = self.current_token {
+   |                               ^^^^^^ variant or associated item not found in `lexer::Token`
+   |
+  ::: src/lexer.rs:2:1
+   |
+ 2 | pub enum Token {
+   | -------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+  --> src/parser.rs:83:33
+   |
+83 |                     Expression::Number(valeur_negative)
+   |                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+   |
+  ::: src/ast.rs:3:1
+   |
+ 3 | pub enum Expression {
+   | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+  --> src/parser.rs:98:33
+   |
+98 |             if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
+   |                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+   |
+  ::: src/ast.rs:3:1
+   |
+ 3 | pub enum Expression {
+   | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+  --> src/parser.rs:98:57
+   |
+98 |             if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
+   |                                                         ^^^^^^ variant or associated item not found in `ast::Expression`
+   |
+  ::: src/ast.rs:3:1
+   |
+ 3 | pub enum Expression {
+   | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:100:48
+    |
+100 |                     Token::Plus => Expression::Number(n1 + n2),
+    |                                                ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:101:49
+    |
+101 |                     Token::Minus => Expression::Number(n1 - n2),
+    |                                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `lexer::Token` in the current scope
+   --> src/parser.rs:130:20
+    |
+130 |             Token::Number(n) => Expression::Number(*n),
+    |                    ^^^^^^ variant or associated item not found in `lexer::Token`
+    |
+   ::: src/lexer.rs:2:1
+    |
+  2 | pub enum Token {
+    | -------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `lexer::Token` in the current scope
+   --> src/parser.rs:118:28
+    |
+118 |                     Token::Number(n) => Expression::Number(-(*n)),
+    |                            ^^^^^^ variant or associated item not found in `lexer::Token`
+    |
+   ::: src/lexer.rs:2:1
+    |
+  2 | pub enum Token {
+    | -------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:118:53
+    |
+118 |                     Token::Number(n) => Expression::Number(-(*n)),
+    |                                                     ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:125:33
+    |
+125 |                     Expression::Number(val) // Si c'est une constante smen, on renvoie son nombre !
+    |                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:130:45
+    |
+130 |             Token::Number(n) => Expression::Number(*n),
+    |                                             ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `lexer::Token` in the current scope
+   --> src/parser.rs:145:24
+    |
+145 |                 Token::Number(n) => Expression::Number(*n),
+    |                        ^^^^^^ variant or associated item not found in `lexer::Token`
+    |
+   ::: src/lexer.rs:2:1
+    |
+  2 | pub enum Token {
+    | -------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:145:49
+    |
+145 |                 Token::Number(n) => Expression::Number(*n),
+    |                                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:150:33
+    |
+150 |             if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
+    |                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:150:57
+    |
+150 |             if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
+    |                                                         ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:152:48
+    |
+152 |                     Token::Star => Expression::Number(n1 * n2),
+    |                                                ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:153:49
+    |
+153 |                     Token::Slash => Expression::Number(n1 / n2),
+    |                                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:218:36
+    |
+218 |                 if let Expression::Number(n) = valeur_expr {
+    |                                    ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+error[E0599]: no variant or associated item named `Number` found for enum `ast::Expression` in the current scope
+   --> src/parser.rs:326:33
+    |
+326 |                     Expression::Number(n) => n as u16,
+    |                                 ^^^^^^ variant or associated item not found in `ast::Expression`
+    |
+   ::: src/ast.rs:3:1
+    |
+  3 | pub enum Expression {
+    | ------------------- variant or associated item `Number` not found for this enum
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `thot` (bin "thot") due to 35 previous errors

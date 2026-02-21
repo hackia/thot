@@ -33,6 +33,22 @@
 | %si      | Source (ESI) – The origin of data flows.                      |
 | %di      | Destination (EDI) – The arrival of data flows.                |
 
+**Register Levels**
+The register name encodes the Helix size. Sizes are total Helix width (Ra + Apophis); each channel is half.
+
+| level   | prefix | total Helix size | per-channel size |
+|---------|--------|------------------|------------------|
+| Base    | (none) | 8                | 4                |
+| Medium  | m      | 16               | 8                |
+| High    | h      | 32               | 16               |
+| Very    | v      | 64               | 32               |
+| Extreme | e      | 128              | 64               |
+| Xenith  | x      | 256              | 128              |
+
+Examples: `%ba` (Base), `%mba` (Medium), `%hba` (High), `%vba` (Very), `%eba` (Extreme), `%xba` (Xenith). Same scheme for `%ka`, `%ib`, `%da`, `%si`, `%di`.
+
+Rules: operations between different sizes are rejected, and overflow is a compile-time error.
+
 ## Installation of the thot compiler
 
 ```bash

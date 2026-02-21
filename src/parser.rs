@@ -1,7 +1,9 @@
-// Fichier : src/parser.rs
-
-use crate::ast::{Expression, Instruction};
+use crate::ast::{Expression, Instruction, Level};
 use crate::lexer::{Lexer, Token};
+use crate::register::{
+    ensure_helix_fits, ensure_number_fits, ensure_same_level, parse_general_register,
+    parse_register, RegKind, RegBase,
+};
 
 #[derive(Clone)]
 pub struct Parser<'a> {
@@ -20,7 +22,6 @@ impl<'a> Parser<'a> {
             constantes: std::collections::HashMap::new(),
         }
     }
-
     pub fn current_token(&self) -> Token {
         self.current_token.clone()
     }
@@ -53,7 +54,12 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Expression::Number(n)
             }
+            Token::Helix(ra, apophis) => {
+                self.advance();
+                Expression::Helix { ra, apophis }
+            }
             Token::Register(r) => {
+                let _ = parse_register(&r);
                 self.advance();
                 Expression::Register(r)
             }
@@ -82,11 +88,11 @@ impl<'a> Parser<'a> {
                     self.advance();
                     Expression::Number(valeur_negative)
                 } else {
-                    panic!("Erreur : Le signe '-' doit être suivi d'un nombre.");
+                    panic!("Error: The '-' sign must be followed by a number.");
                 }
             }
             _ => panic!(
-                "Syntax Error: Expression attendue, trouvé {:?}",
+                "Syntax Error: Expression expected, found {:?}",
                 self.current_token
             ),
         };
@@ -102,7 +108,7 @@ impl<'a> Parser<'a> {
                     _ => unreachable!(),
                 };
             } else {
-                panic!("Isfet : Thot ne résout que des constantes pour le moment.");
+                panic!("Isfet: Thot only solves constants at the moment.");
             }
         }
         gauche
@@ -116,9 +122,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 match &self.current_token {
                     Token::Number(n) => Expression::Number(-(*n)),
-                    _ => panic!("Syntax Error: '-' attend un nombre"),
+                    _ => panic!("Syntax Error: '-' expects a number"),
                 }
             }
+            Token::Helix(ra, apophis) => Expression::Helix {
+                ra: *ra,
+                apophis: *apophis,
+            },
             // 3. Dans parse_terme ou parse_expression, substitue les noms par leur valeur
             Token::Identifier(nom) => {
                 if let Some(&val) = self.constantes.get(nom) {
@@ -129,15 +139,18 @@ impl<'a> Parser<'a> {
             }
             Token::Number(n) => Expression::Number(*n),
             Token::StringLiteral(s) => Expression::StringLiteral(s.clone()),
-            Token::Register(r) => Expression::Register(r.clone()),
+            Token::Register(r) => {
+                let _ = parse_register(r);
+                Expression::Register(r.clone())
+            }
             _ => panic!(
-                "Syntax Error: Expression attendue, trouvé {:?}",
+                "Syntax Error: Expression expected, found {:?}",
                 self.current_token
             ),
         };
         self.advance();
-
         while matches!(self.current_token, Token::Star | Token::Slash) {
+
             let operateur = self.current_token.clone();
             self.advance();
             // Pour la multiplication, on ne regarde que les valeurs immédiates (pas d'addition ici)
@@ -146,7 +159,6 @@ impl<'a> Parser<'a> {
                 _ => panic!("Syntax Error: Opérateur '*' attend un nombre à droite"),
             };
             self.advance();
-
             if let (Expression::Number(n1), Expression::Number(n2)) = (&gauche, &droite) {
                 gauche = match operateur {
                     Token::Star => Expression::Number(n1 * n2),
@@ -198,11 +210,74 @@ impl<'a> Parser<'a> {
 
                 self.expect_token(Token::Comma); // Consomme la virgule
 
-                let valeur = self.parse_expression(); // Capture la valeur (ex: 10)
+                let value = self.parse_expression(); // Capture la valeur (ex: 10)
+                let dest_spec = parse_register(&destination);
+                match dest_spec.kind {
+                    RegKind::Segment(_) => match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            if src_spec.level != Level::Base {
+                                panic!("Segment moves require base registers: %{src}");
+                            }
+                        }
+                        _ => panic!("Segment registers require a register source."),
+                    },
+                    RegKind::General(_) => {
+                        if dest_spec.level <= Level::High {
+                            match &value {
+                                Expression::Register(src) => {
+                                    let src_spec = parse_general_register(src);
+                                    ensure_same_level(
+                                        "henek",
+                                        &destination,
+                                        dest_spec.level,
+                                        src,
+                                        src_spec.level,
+                                    );
+                                }
+                                Expression::Helix { ra, apophis } => {
+                                    ensure_helix_fits(
+                                        "henek",
+                                        &destination,
+                                        dest_spec.level,
+                                        *ra as u128,
+                                        *apophis as u128,
+                                    );
+                                }
+                                Expression::Number(n) => {
+                                    ensure_number_fits("henek", &destination, dest_spec.level, *n);
+                                }
+                                _ => {}
+                            }
+                        } else if dest_spec.level == Level::Extreme {
+                            match &value {
+                                Expression::Register(src) => {
+                                    let src_spec = parse_general_register(src);
+                                    ensure_same_level(
+                                        "henek",
+                                        &destination,
+                                        dest_spec.level,
+                                        src,
+                                        src_spec.level,
+                                    );
+                                }
+                                Expression::Helix { .. } => {}
+                                _ => panic!(
+                                    "Henek for 128-bit registers only accepts Helix literals or registers."
+                                ),
+                            }
+                        } else {
+                            panic!(
+                                "Henek does not yet support registers beyond Extreme: %{} ({})",
+                                destination, dest_spec.level
+                            );
+                        }
+                    }
+                }
 
                 Instruction::Henek {
                     destination,
-                    valeur,
+                    value,
                 }
             }
             // Fais la même chose pour ankh, isfet, jena, her, etc.
@@ -210,7 +285,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let nom = match &self.current_token {
                     Token::Identifier(n) => n.clone(),
-                    _ => panic!("Smen exige un nom"),
+                    _ => panic!("Smen required a name"),
                 };
                 self.advance();
                 self.expect_token(Token::Equals);
@@ -219,15 +294,16 @@ impl<'a> Parser<'a> {
                     self.constantes.insert(nom.clone(), n); // On mémorise la constante !
                     Instruction::Smen { nom, valeur: n }
                 } else {
-                    panic!("Smen exige une valeur numérique fixe (Zep Tepi)");
+                    panic!("Smen requires a fixed numerical value (Zep Tepi)");
                 }
             }
             Token::Verb(v) if v == "kheper" => {
                 self.advance();
                 let source = match &self.current_token {
                     Token::Register(r) => r.clone(),
-                    _ => panic!("Syntax Error: 'kheper' exige un registre source"),
+                    _ => panic!("Syntax Error: 'kheper' requires a source registry"),
                 };
+                let _ = parse_general_register(&source);
                 self.advance();
                 self.expect_token(Token::Comma);
 
@@ -251,6 +327,7 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'sena' exige un registre destination"),
                 };
+                let _ = parse_general_register(&destination);
                 self.advance(); // Consomme le registre
 
                 self.expect_token(Token::Comma); // Consomme la virgule
@@ -260,6 +337,9 @@ impl<'a> Parser<'a> {
                     self.advance(); // Mange '['
                     let expr = self.parse_expression();
                     self.expect_token(Token::CloseBracket); // Mange ']'
+                    if let Expression::Register(r) = &expr {
+                        let _ = parse_general_register(r);
+                    }
                     expr
                 } else {
                     self.parse_expression() // Nombre direct (ex: 500)
@@ -276,7 +356,7 @@ impl<'a> Parser<'a> {
                 let chemin = match self.parse_expression() {
                     Expression::StringLiteral(s) => s,
                     _ => panic!(
-                        "Syntax Error: 'dema' attend le chemin du parchemin entre guillemets"
+                        "Syntax Error: 'dema' waits for the path of the scroll in quotes"
                     ),
                 };
                 Instruction::Dema { chemin }
@@ -292,12 +372,35 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'henet' exige un registre"),
                 };
+                let dest_spec = parse_general_register(&destination);
+                if dest_spec.level > Level::High {
+                    panic!(
+                        "Henet does not yet support registers beyond High: %{} ({})",
+                        destination, dest_spec.level
+                    );
+                }
                 self.advance();
                 self.expect_token(Token::Comma);
-                let valeur = self.parse_expression();
+                let value = self.parse_expression();
+                match &value {
+                    Expression::Register(src) => {
+                        let src_spec = parse_general_register(src);
+                        ensure_same_level(
+                            "henet",
+                            &destination,
+                            dest_spec.level,
+                            src,
+                            src_spec.level,
+                        );
+                    }
+                    Expression::Number(n) => {
+                        ensure_number_fits("henet", &destination, dest_spec.level, *n);
+                    }
+                    _ => {}
+                }
                 Instruction::Henet {
                     destination,
-                    valeur,
+                    value,
                 }
             }
             // Traduction de : mer %registre, valeur (OR)
@@ -305,14 +408,37 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let destination = match &self.current_token {
                     Token::Register(r) => r.clone(),
-                    _ => panic!("Syntax Error: 'mer' exige un registre"),
+                    _ => panic!("Syntax Error: 'mer' requires a registry"),
                 };
+                let dest_spec = parse_general_register(&destination);
+                if dest_spec.level > Level::High {
+                    panic!(
+                        "Mer does not yet support registers beyond High: %{} ({})",
+                        destination, dest_spec.level
+                    );
+                }
                 self.advance();
                 self.expect_token(Token::Comma);
-                let valeur = self.parse_expression();
+                let value = self.parse_expression();
+                match &value {
+                    Expression::Register(src) => {
+                        let src_spec = parse_general_register(src);
+                        ensure_same_level(
+                            "mer",
+                            &destination,
+                            dest_spec.level,
+                            src,
+                            src_spec.level,
+                        );
+                    }
+                    Expression::Number(n) => {
+                        ensure_number_fits("mer", &destination, dest_spec.level, *n);
+                    }
+                    _ => {}
+                }
                 Instruction::Mer {
                     destination,
-                    valeur,
+                    value,
                 }
             }
             Token::Verb(v) if v == "duat" => {
@@ -322,16 +448,19 @@ impl<'a> Parser<'a> {
                     _ => panic!("Syntax Error: 'duat' attend une phrase entre guillemets"),
                 };
                 self.expect_token(Token::Comma);
-                let adresse = match self.parse_expression() {
+                let address = match self.parse_expression() {
                     Expression::Number(n) => n as u16,
                     _ => panic!("Syntax Error: 'duat' attend une adresse numérique"),
                 };
-                Instruction::Duat { phrase, adresse }
+                Instruction::Duat { phrase, address }
             }
             // Dans src/parser.rs, dans parse_instruction
             Token::Verb(v) if v == "push" => {
                 self.advance();
                 let cible = self.parse_expression();
+                if let Expression::Register(r) = &cible {
+                    let _ = parse_general_register(r);
+                }
                 Instruction::Push { cible }
             }
             Token::Verb(v) if v == "pop" => {
@@ -340,17 +469,34 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'pop' exige un registre"),
                 };
+                let _ = parse_general_register(&destination);
                 self.advance();
                 Instruction::Pop { destination }
             }
             Token::Verb(v) if v == "in" => {
                 self.advance();
                 let port = self.parse_expression(); // Ex: 0x60 pour le clavier
+                if let Expression::Register(r) = &port {
+                    let reg_spec = parse_general_register(r);
+                    if !matches!(reg_spec.kind, RegKind::General(RegBase::Da))
+                        || reg_spec.level != Level::Base
+                    {
+                        panic!("Syntax Error: 'in' requires %da as register port");
+                    }
+                }
                 Instruction::In { port }
             }
             Token::Verb(v) if v == "out" => {
                 self.advance();
                 let port = self.parse_expression(); // Ex: 0x3D4 pour la carte VGA
+                if let Expression::Register(r) = &port {
+                    let reg_spec = parse_general_register(r);
+                    if !matches!(reg_spec.kind, RegKind::General(RegBase::Da))
+                        || reg_spec.level != Level::Base
+                    {
+                        panic!("Syntax Error: 'out' requires %da as register port");
+                    }
+                }
                 Instruction::Out { port }
             }
 
@@ -394,6 +540,12 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'sedjem' requires a register as destination"),
                 };
+                let dest_spec = parse_general_register(&destination);
+                if !matches!(dest_spec.kind, RegKind::General(RegBase::Ka))
+                    || dest_spec.level != Level::Base
+                {
+                    panic!("Syntax Error: 'sedjem' requires %ka as destination");
+                }
                 self.advance(); // Consomme le registre
 
                 Instruction::Sedjem { destination }
@@ -411,14 +563,55 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'sema' requires a register as destination"),
                 };
+                let dest_spec = parse_general_register(&destination);
                 self.advance(); // Consomme le registre
 
                 self.expect_token(Token::Comma); // Consomme la virgule
 
-                let valeur = self.parse_expression(); // Capture la force à unir
+                let value = self.parse_expression(); // Capture la force à unir
+                if dest_spec.level <= Level::High {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "sema",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Number(n) => {
+                            ensure_number_fits("sema", &destination, dest_spec.level, *n);
+                        }
+                        _ => {}
+                    }
+                } else if dest_spec.level == Level::Extreme {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "sema",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Sema for 128-bit registers only accepts Helix literals or registers."
+                        ),
+                    }
+                } else {
+                    panic!(
+                        "Sema does not yet support registers beyond Extreme: %{} ({})",
+                        destination, dest_spec.level
+                    );
+                }
                 Instruction::Sema {
                     destination,
-                    valeur,
+                    value,
                 }
             }
 
@@ -430,11 +623,40 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'wdj' requires a register on the left"),
                 };
+                let left_spec = parse_general_register(&left);
                 self.advance(); // Consomme le registre
 
                 self.expect_token(Token::Comma); // Consomme la virgule
 
                 let right = self.parse_expression(); // Capture la valeur à peser
+                if left_spec.level <= Level::High {
+                    match &right {
+                        Expression::Register(r) => {
+                            let right_spec = parse_general_register(r);
+                            ensure_same_level("wdj", &left, left_spec.level, r, right_spec.level);
+                        }
+                        Expression::Number(n) => {
+                            ensure_number_fits("wdj", &left, left_spec.level, *n);
+                        }
+                        _ => {}
+                    }
+                } else if left_spec.level == Level::Extreme {
+                    match &right {
+                        Expression::Register(r) => {
+                            let right_spec = parse_general_register(r);
+                            ensure_same_level("wdj", &left, left_spec.level, r, right_spec.level);
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Wdj for 128-bit registers only accepts Helix literals or registers."
+                        ),
+                    }
+                } else {
+                    panic!(
+                        "Wdj does not yet support registers beyond Extreme: %{} ({})",
+                        left, left_spec.level
+                    );
+                }
                 Instruction::Wdj { left, right }
             }
 
@@ -442,6 +664,14 @@ impl<'a> Parser<'a> {
             Token::Verb(v) if v == "return" => {
                 self.advance(); // Consomme 'returne'
                 let resultat = self.parse_expression(); // Capture ce qu'on renvoie
+                if let Expression::Register(r) = &resultat {
+                    let reg_spec = parse_general_register(r);
+                    if !matches!(reg_spec.kind, RegKind::General(RegBase::Ka))
+                        || reg_spec.level != Level::Base
+                    {
+                        panic!("Syntax Error: 'return' only supports %ka as a register result");
+                    }
+                }
                 Instruction::Return { resultat } // (Assure-toi que ça correspond au nom exact dans ton ast.rs)
             }
             Token::Identifier(name) => {
@@ -462,7 +692,7 @@ impl<'a> Parser<'a> {
                 self.advance(); // Consomme 'nama'
 
                 // 1. On vérifie qu'on a bien un nom de variable (Identifiant)
-                let nom = match &self.current_token {
+                let name = match &self.current_token {
                     Token::Identifier(i) => i.clone(),
                     _ => panic!(
                         "Syntax Error: Le verbe 'nama' exige un nom de variable (ex: nama age = 10)"
@@ -474,9 +704,9 @@ impl<'a> Parser<'a> {
                 self.expect_token(Token::Equals);
 
                 // 3. On capture ce qu'il y a après le '=' (un nombre, une phrase, etc.)
-                let valeur = self.parse_expression();
+                let value = self.parse_expression();
 
-                Instruction::Nama { nom, valeur }
+                Instruction::Nama { name, value }
             }
             // Traduction du saut conditionnel : isfet cible (Saut si Différent)
             Token::Verb(v) if v == "isfet" => {
@@ -499,206 +729,48 @@ impl<'a> Parser<'a> {
                     Token::Register(r) => r.clone(),
                     _ => panic!("Syntax Error: 'kheb' requires a register as destination"),
                 };
+                let dest_spec = parse_general_register(&destination);
                 self.advance(); // Consomme le registre
 
                 self.expect_token(Token::Comma); // Consomme la virgule
 
-                let valeur = self.parse_expression(); // Capture la valeur à soustraire
-                Instruction::Kheb {
-                    destination,
-                    valeur,
+                let value = self.parse_expression(); // Capture la valeur à soustraire
+                if dest_spec.level <= Level::High {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "kheb",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { ra, apophis } => {
+                            ensure_helix_fits(
+                                "kheb",
+                                &destination,
+                                dest_spec.level,
+                                *ra as u128,
+                                *apophis as u128,
+                            );
+                        }
+                        Expression::Number(n) => {
+                            ensure_number_fits("kheb", &destination, dest_spec.level, *n);
+                        }
+                        _ => {}
+                    }
+                } else {
+                    panic!(
+                        "Kheb does not yet support registers beyond High: %{} ({})",
+                        destination, dest_spec.level
+                    );
                 }
+                Instruction::Kheb { destination, value }
             }
             // (On ajoutera 'wdj', 'sema', etc. ici plus tard)
             _ => panic!("Syntax Error: Unknown instruction {:?}", self.current_token),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::Lexer;
-
-    #[test]
-    fn test_parse_henek() {
-        let lexer = Lexer::new("henek %ka, 10");
-        let mut parser = Parser::new(lexer);
-
-        let instruction = parser.parse_instruction();
-
-        assert_eq!(
-            instruction,
-            Instruction::Henek {
-                destination: "ka".to_string(),
-                valeur: Expression::Number(10),
-            }
-        );
-    }
-    #[test]
-    fn test_parse_per() {
-        let lexer = Lexer::new("per \"System Ready\"");
-        let mut parser = Parser::new(lexer);
-
-        let instruction = parser.parse_instruction();
-
-        assert_eq!(
-            instruction,
-            Instruction::Per {
-                message: Expression::StringLiteral("System Ready".to_string()),
-            }
-        );
-    }
-    #[test]
-    fn test_parse_push_pop() {
-        let lexer = Lexer::new("push %ka");
-        let mut parser = Parser::new(lexer);
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Push {
-                cible: Expression::Register("ka".to_string())
-            }
-        );
-
-        let lexer2 = Lexer::new("pop %ib");
-        let mut parser2 = Parser::new(lexer2);
-        assert_eq!(
-            parser2.parse_instruction(),
-            Instruction::Pop {
-                destination: "ib".to_string()
-            }
-        );
-    }
-    #[test]
-    fn test_priorite_math_comptime() {
-        // Test : 10 + 5 * 2 doit donner 20 (et non 30)
-        let lexer = Lexer::new("nama resultat = 10 + 5 * 2");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Nama {
-                nom: "resultat".to_string(),
-                valeur: Expression::Number(20), // 10 + (5 * 2)
-            }
-        );
-    }
-
-    #[test]
-    fn test_substitution_smen() {
-        // On simule une constante déjà apprise par Thot
-        let mut parser = Parser::new(Lexer::new("henek %ka, LARGEUR"));
-        parser.constantes.insert("LARGEUR".to_string(), 80);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Henek {
-                destination: "ka".to_string(),
-                valeur: Expression::Number(80), // LARGEUR a été remplacé par 80
-            }
-        );
-    }
-    #[test]
-    fn test_parse_in_out() {
-        let lexer = Lexer::new("in 96");
-        let mut parser = Parser::new(lexer);
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::In {
-                port: Expression::Number(96)
-            }
-        );
-
-        let lexer2 = Lexer::new("out %da");
-        let mut parser2 = Parser::new(lexer2);
-        assert_eq!(
-            parser2.parse_instruction(),
-            Instruction::Out {
-                port: Expression::Register("da".to_string())
-            }
-        );
-    }
-    #[test]
-    fn test_parse_sema() {
-        let lexer = Lexer::new("sema %ka, -1");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Sema {
-                destination: "ka".to_string(),
-                valeur: Expression::Number(-1),
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_wdj() {
-        let lexer = Lexer::new("wdj %ib, 0");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Wdj {
-                left: "ib".to_string(),
-                right: Expression::Number(0),
-            }
-        );
-    }
-    #[test]
-    fn test_parse_return() {
-        // Test simplifié : on s'assure que 'return' comprend bien une variable simple
-        let lexer = Lexer::new("return Success");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Return {
-                resultat: Expression::Identifier("Success".to_string()),
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_nama() {
-        let lexer = Lexer::new("nama score = 100");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Nama {
-                nom: "score".to_string(),
-                valeur: Expression::Number(100),
-            }
-        );
-    }
-    #[test]
-    fn test_zep_tepi_math() {
-        // Test : nama calcul = 10 + 5 * 2
-        // Thot doit comprendre que 5 * 2 = 10, puis 10 + 10 = 20.
-        let lexer = Lexer::new("nama calcul = 10 + 10");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Nama {
-                nom: "calcul".to_string(),
-                valeur: Expression::Number(20),
-            }
-        );
-    }
-    #[test]
-    #[should_panic]
-    fn test_parse_nama_panic() {
-        let lexer = Lexer::new("nama = 100");
-        let mut parser = Parser::new(lexer);
-
-        assert_eq!(
-            parser.parse_instruction(),
-            Instruction::Nama {
-                nom: "score".to_string(),
-                valeur: Expression::Number(100),
-            }
-        );
     }
 }

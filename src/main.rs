@@ -3,6 +3,7 @@ mod elf;
 mod emitter;
 mod lexer;
 mod parser;
+mod register;
 
 use crate::ast::Instruction;
 use crate::elf::Sarcophage;
@@ -128,17 +129,19 @@ fn main() {
 
             // 4. Émetteur (Le Marteau)
             // On lui donne maintenant les instructions fusionnées, pures de tout 'dema'
-            let emetteur = Emitter::new(instructions_fusionnees, kbd_layout);
-            let code_machine = emetteur.generer_binaire(matches.get_flag("boot"));
+            let bin = Emitter::new()
+                .add_instruction(instructions_fusionnees.clone())
+                .set_kbd_layout(kbd_layout.clone())
+                .generer_binaire(matches.get_flag("boot"));
 
-            let binaire_final = if matches.get_flag("boot") {
-                code_machine
+            let binary = if matches.get_flag("boot") {
+                bin
             } else {
-                Sarcophage::emballer(&code_machine)
+                Sarcophage::emballer(&bin)
             };
 
             // 6. Écriture sur le disque dur
-            fs::write(o, binaire_final).expect("Erreur lors de l'écriture du fichier");
+            fs::write(o, binary).expect("Erreur lors de l'écriture du fichier");
 
             #[cfg(unix)]
             {
