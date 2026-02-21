@@ -373,30 +373,57 @@ impl<'a> Parser<'a> {
                     _ => panic!("Syntax Error: 'henet' exige un registre"),
                 };
                 let dest_spec = parse_general_register(&destination);
-                if dest_spec.level > Level::High {
-                    panic!(
-                        "Henet does not yet support registers beyond High: %{} ({})",
-                        destination, dest_spec.level
-                    );
-                }
                 self.advance();
                 self.expect_token(Token::Comma);
                 let value = self.parse_expression();
-                match &value {
-                    Expression::Register(src) => {
-                        let src_spec = parse_general_register(src);
-                        ensure_same_level(
-                            "henet",
-                            &destination,
-                            dest_spec.level,
-                            src,
-                            src_spec.level,
-                        );
+                if dest_spec.level <= Level::High {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "henet",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { ra, apophis } => {
+                            ensure_helix_fits(
+                                "henet",
+                                &destination,
+                                dest_spec.level,
+                                *ra as u128,
+                                *apophis as u128,
+                            );
+                        }
+                        Expression::Number(n) => {
+                            ensure_number_fits("henet", &destination, dest_spec.level, *n);
+                        }
+                        _ => {}
                     }
-                    Expression::Number(n) => {
-                        ensure_number_fits("henet", &destination, dest_spec.level, *n);
+                } else if dest_spec.level == Level::Extreme {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "henet",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Henet for 128-bit registers only accepts Helix literals or registers."
+                        ),
                     }
-                    _ => {}
+                } else {
+                    panic!(
+                        "Henet does not yet support registers beyond Extreme: %{} ({})",
+                        destination, dest_spec.level
+                    );
                 }
                 Instruction::Henet {
                     destination,
@@ -411,30 +438,57 @@ impl<'a> Parser<'a> {
                     _ => panic!("Syntax Error: 'mer' requires a registry"),
                 };
                 let dest_spec = parse_general_register(&destination);
-                if dest_spec.level > Level::High {
-                    panic!(
-                        "Mer does not yet support registers beyond High: %{} ({})",
-                        destination, dest_spec.level
-                    );
-                }
                 self.advance();
                 self.expect_token(Token::Comma);
                 let value = self.parse_expression();
-                match &value {
-                    Expression::Register(src) => {
-                        let src_spec = parse_general_register(src);
-                        ensure_same_level(
-                            "mer",
-                            &destination,
-                            dest_spec.level,
-                            src,
-                            src_spec.level,
-                        );
+                if dest_spec.level <= Level::High {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "mer",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { ra, apophis } => {
+                            ensure_helix_fits(
+                                "mer",
+                                &destination,
+                                dest_spec.level,
+                                *ra as u128,
+                                *apophis as u128,
+                            );
+                        }
+                        Expression::Number(n) => {
+                            ensure_number_fits("mer", &destination, dest_spec.level, *n);
+                        }
+                        _ => {}
                     }
-                    Expression::Number(n) => {
-                        ensure_number_fits("mer", &destination, dest_spec.level, *n);
+                } else if dest_spec.level == Level::Extreme {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "mer",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Mer for 128-bit registers only accepts Helix literals or registers."
+                        ),
                     }
-                    _ => {}
+                } else {
+                    panic!(
+                        "Mer does not yet support registers beyond Extreme: %{} ({})",
+                        destination, dest_spec.level
+                    );
                 }
                 Instruction::Mer {
                     destination,
@@ -581,6 +635,15 @@ impl<'a> Parser<'a> {
                                 src_spec.level,
                             );
                         }
+                        Expression::Helix { ra, apophis } => {
+                            ensure_helix_fits(
+                                "sema",
+                                &destination,
+                                dest_spec.level,
+                                *ra as u128,
+                                *apophis as u128,
+                            );
+                        }
                         Expression::Number(n) => {
                             ensure_number_fits("sema", &destination, dest_spec.level, *n);
                         }
@@ -614,6 +677,74 @@ impl<'a> Parser<'a> {
                     value,
                 }
             }
+            // Traduction de : shesa %registre, valeur
+            Token::Verb(v) if v == "shesa" => {
+                self.advance(); // Consomme 'shesa'
+
+                let destination = match &self.current_token {
+                    Token::Register(r) => r.clone(),
+                    _ => panic!("Syntax Error: 'shesa' requires a register as destination"),
+                };
+                let dest_spec = parse_general_register(&destination);
+                self.advance(); // Consomme le registre
+
+                self.expect_token(Token::Comma); // Consomme la virgule
+
+                let value = self.parse_expression(); // Capture la force à multiplier
+                if dest_spec.level <= Level::High {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "shesa",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { ra, apophis } => {
+                            ensure_helix_fits(
+                                "shesa",
+                                &destination,
+                                dest_spec.level,
+                                *ra as u128,
+                                *apophis as u128,
+                            );
+                        }
+                        Expression::Number(n) => {
+                            ensure_number_fits("shesa", &destination, dest_spec.level, *n);
+                        }
+                        _ => {}
+                    }
+                } else if dest_spec.level == Level::Extreme {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "shesa",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Shesa for 128-bit registers only accepts Helix literals or registers."
+                        ),
+                    }
+                } else {
+                    panic!(
+                        "Shesa does not yet support registers beyond Extreme: %{} ({})",
+                        destination, dest_spec.level
+                    );
+                }
+                Instruction::Shesa {
+                    destination,
+                    value,
+                }
+            }
 
             // Traduction de : wdj %registre, valeur
             Token::Verb(v) if v == "wdj" => {
@@ -634,6 +765,15 @@ impl<'a> Parser<'a> {
                         Expression::Register(r) => {
                             let right_spec = parse_general_register(r);
                             ensure_same_level("wdj", &left, left_spec.level, r, right_spec.level);
+                        }
+                        Expression::Helix { ra, apophis } => {
+                            ensure_helix_fits(
+                                "wdj",
+                                &left,
+                                left_spec.level,
+                                *ra as u128,
+                                *apophis as u128,
+                            );
                         }
                         Expression::Number(n) => {
                             ensure_number_fits("wdj", &left, left_spec.level, *n);
@@ -761,9 +901,26 @@ impl<'a> Parser<'a> {
                         }
                         _ => {}
                     }
+                } else if dest_spec.level == Level::Extreme {
+                    match &value {
+                        Expression::Register(src) => {
+                            let src_spec = parse_general_register(src);
+                            ensure_same_level(
+                                "kheb",
+                                &destination,
+                                dest_spec.level,
+                                src,
+                                src_spec.level,
+                            );
+                        }
+                        Expression::Helix { .. } => {}
+                        _ => panic!(
+                            "Kheb for 128-bit registers only accepts Helix literals or registers."
+                        ),
+                    }
                 } else {
                     panic!(
-                        "Kheb does not yet support registers beyond High: %{} ({})",
+                        "Kheb does not yet support registers beyond Extreme: %{} ({})",
                         destination, dest_spec.level
                     );
                 }

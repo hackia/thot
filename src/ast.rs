@@ -362,6 +362,11 @@ pub enum Instruction {
         destination: String,
         value: Expression,
     },
+    // shesa %registre, valeur
+    Shesa {
+        destination: String,
+        value: Expression,
+    },
     // Une étiquette dans le code (ex: "boucle:")
     Label(String),
     // wdj %registre, valeur

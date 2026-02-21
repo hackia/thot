@@ -202,9 +202,9 @@ impl<'a> Lexer<'a> {
                 match word.as_str() {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
-                    | "kheb" | "henet" | "mer" | "her" | "kher" | "her_ankh" | "kher_ankh"
-                    | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen" | "rdtsc"
-                    | "kherp" => Token::Verb(word),
+                    | "kheb" | "henet" | "mer" | "shesa" | "her" | "kher" | "her_ankh"
+                    | "kher_ankh" | "dema" | "push" | "pop" | "in" | "out" | "nama"
+                    | "smen" | "rdtsc" | "kherp" => Token::Verb(word),
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }

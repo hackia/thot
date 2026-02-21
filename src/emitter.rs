@@ -83,6 +83,19 @@ impl Emitter {
         self.cursor_noun += block.len() as u16;
         addr
     }
+
+    fn alloc_xenith_literal(&mut self, ra: u16, apophis: u16) -> u16 {
+        let addr = self.cursor_noun;
+        let mut block = vec![0u8; Level::Xenith.bytes() as usize];
+        let ra64 = (ra as u64).to_le_bytes();
+        let ap64 = (apophis as u64).to_le_bytes();
+        block[0..8].copy_from_slice(&ra64);
+        block[8..16].copy_from_slice(&ap64);
+        // Reste du bloc (16..32) = 0
+        self.segment_noun.extend_from_slice(&block);
+        self.cursor_noun += block.len() as u16;
+        addr
+    }
     pub fn kherankh(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
         // OpCode pour JLE (Jump if Less or Equal)
         actual_code.push(0x0F);
@@ -145,73 +158,253 @@ impl Emitter {
         }
     }
     pub fn mer(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
-        actual_code.push(0x66);
-        actual_code.push(0x81);
-        let dest_spec = parse_general_register(destination);
-        ensure_supported_level("mer", destination, dest_spec.level);
-        if let RegKind::General(dest_base) = dest_spec.kind {
-            actual_code.push(modrm_imm(dest_base, 1));
-        }
-        if let Expression::Number(n) = value {
-            ensure_number_fits("mer", destination, dest_spec.level, *n);
-            actual_code.extend_from_slice(&n.to_le_bytes());
-        }
-    }
-    pub fn henet(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
-        actual_code.push(0x66); // Stabilisation 32 bits
-        actual_code.push(0x81); // Opcode groupe logique
-        let dest_spec = parse_general_register(destination);
-        ensure_supported_level("henet", destination, dest_spec.level);
-        if let RegKind::General(dest_base) = dest_spec.kind {
-            actual_code.push(modrm_imm(dest_base, 4));
-        }
-        if let Expression::Number(n) = value {
-            ensure_number_fits("henet", destination, dest_spec.level, *n);
-            actual_code.extend_from_slice(&n.to_le_bytes()); //
-        }
-    }
-    pub fn kheb(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
-        actual_code.push(0x66); // Stabilisation 32 bits
-
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
             _ => unreachable!(),
         };
-        ensure_supported_level("kheb", destination, dest_spec.level);
-
-        match value {
-            Expression::Helix { ra, apophis } => {
-                ensure_supported_level("kheb", destination, dest_spec.level);
-                ensure_helix_fits(
-                    "kheb",
-                    destination,
-                    dest_spec.level,
-                    *ra as u128,
-                    *apophis as u128,
-                );
-                // 1. Fusion des deux forces en un seul bloc de 32 bits
-                let n = ((*ra as i32) << 16) | (*apophis as i32);
-                // 2. Le reste ne change pas !
-                actual_code.push(0xB8 + reg_code(dest_base));
-                actual_code.extend_from_slice(&n.to_le_bytes());
+        if dest_spec.level <= Level::High {
+            actual_code.push(0x66);
+            ensure_supported_level("mer", destination, dest_spec.level);
+            match value {
+                Expression::Number(n) => {
+                    actual_code.push(0x81);
+                    actual_code.push(modrm_imm(dest_base, 1));
+                    ensure_number_fits("mer", destination, dest_spec.level, *n);
+                    actual_code.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Helix { ra, apophis } => {
+                    ensure_helix_fits(
+                        "mer",
+                        destination,
+                        dest_spec.level,
+                        *ra as u128,
+                        *apophis as u128,
+                    );
+                    let n = ((*ra as i32) << 16) | (*apophis as i32);
+                    actual_code.push(0x81);
+                    actual_code.push(modrm_imm(dest_base, 1));
+                    actual_code.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("mer", destination, dest_spec.level, src, src_spec.level);
+                    ensure_supported_level("mer", src, src_spec.level);
+                    actual_code.push(0x09); // OR r/m32, r32
+                    actual_code.push(modrm_reg_reg(dest_base, src_base));
+                }
+                _ => panic!("Mer only supports numbers, Helix literals, or registers."),
             }
-            Expression::Register(src) => {
-                // MODE 2 : Soustraire un Registre (SUB r/m32, reg32)
-                actual_code.push(0x29); // OpCode SUB registre à registre
-
-                let src_spec = parse_general_register(src);
-                let src_base = match src_spec.kind {
-                    RegKind::General(base) => base,
-                    _ => unreachable!(),
-                };
-                ensure_same_level("kheb", destination, dest_spec.level, src, src_spec.level);
-                ensure_supported_level("kheb", src, src_spec.level);
-
-                let modrm = modrm_reg_reg(dest_base, src_base);
-                actual_code.push(modrm);
+        } else if dest_spec.level == Level::Extreme {
+            match value {
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("mer", destination, dest_spec.level, src, src_spec.level);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
+                    actual_code.push(0xE8);
+                    self.jump.push((
+                        actual_code.len(),
+                        Expression::Identifier("__helix_or128".to_string()),
+                        self.in_kernel,
+                    ));
+                    actual_code.extend_from_slice(&[0x00, 0x00]);
+                }
+                Expression::Helix { ra, apophis } => {
+                    let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+                    self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
+                    actual_code.push(0xE8);
+                    self.jump.push((
+                        actual_code.len(),
+                        Expression::Identifier("__helix_or128".to_string()),
+                        self.in_kernel,
+                    ));
+                    actual_code.extend_from_slice(&[0x00, 0x00]);
+                }
+                _ => panic!("Mer only supports Helix literals or registers for 128-bit."),
             }
-            _ => panic!("Kheb only supports numbers or registers."),
+        } else {
+            panic!(
+                "Mer does not yet support registers beyond Extreme: %{} ({})",
+                destination, dest_spec.level
+            );
+        }
+    }
+    pub fn henet(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
+        let dest_spec = parse_general_register(destination);
+        let dest_base = match dest_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+        if dest_spec.level <= Level::High {
+            actual_code.push(0x66); // Stabilisation 32 bits
+            ensure_supported_level("henet", destination, dest_spec.level);
+            match value {
+                Expression::Number(n) => {
+                    actual_code.push(0x81); // Opcode groupe logique
+                    actual_code.push(modrm_imm(dest_base, 4));
+                    ensure_number_fits("henet", destination, dest_spec.level, *n);
+                    actual_code.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Helix { ra, apophis } => {
+                    ensure_helix_fits(
+                        "henet",
+                        destination,
+                        dest_spec.level,
+                        *ra as u128,
+                        *apophis as u128,
+                    );
+                    let n = ((*ra as i32) << 16) | (*apophis as i32);
+                    actual_code.push(0x81);
+                    actual_code.push(modrm_imm(dest_base, 4));
+                    actual_code.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("henet", destination, dest_spec.level, src, src_spec.level);
+                    ensure_supported_level("henet", src, src_spec.level);
+                    actual_code.push(0x21); // AND r/m32, r32
+                    actual_code.push(modrm_reg_reg(dest_base, src_base));
+                }
+                _ => panic!("Henet only supports numbers, Helix literals, or registers."),
+            }
+        } else if dest_spec.level == Level::Extreme {
+            match value {
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("henet", destination, dest_spec.level, src, src_spec.level);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
+                    actual_code.push(0xE8);
+                    self.jump.push((
+                        actual_code.len(),
+                        Expression::Identifier("__helix_and128".to_string()),
+                        self.in_kernel,
+                    ));
+                    actual_code.extend_from_slice(&[0x00, 0x00]);
+                }
+                Expression::Helix { ra, apophis } => {
+                    let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+                    self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
+                    actual_code.push(0xE8);
+                    self.jump.push((
+                        actual_code.len(),
+                        Expression::Identifier("__helix_and128".to_string()),
+                        self.in_kernel,
+                    ));
+                    actual_code.extend_from_slice(&[0x00, 0x00]);
+                }
+                _ => panic!("Henet only supports Helix literals or registers for 128-bit."),
+            }
+        } else {
+            panic!(
+                "Henet does not yet support registers beyond Extreme: %{} ({})",
+                destination, dest_spec.level
+            );
+        }
+    }
+    pub fn kheb(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
+        let dest_spec = parse_general_register(destination);
+        let dest_base = match dest_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+        if dest_spec.level <= Level::High {
+            actual_code.push(0x66); // Stabilisation 32 bits
+            ensure_supported_level("kheb", destination, dest_spec.level);
+            match value {
+                Expression::Number(n) => {
+                    actual_code.push(0x81); // SUB r/m32, imm32
+                    actual_code.push(modrm_imm(dest_base, 5));
+                    ensure_number_fits("kheb", destination, dest_spec.level, *n);
+                    actual_code.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Helix { ra, apophis } => {
+                    ensure_helix_fits(
+                        "kheb",
+                        destination,
+                        dest_spec.level,
+                        *ra as u128,
+                        *apophis as u128,
+                    );
+                    let n = ((*ra as i32) << 16) | (*apophis as i32);
+                    actual_code.push(0x81);
+                    actual_code.push(modrm_imm(dest_base, 5));
+                    actual_code.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Register(src) => {
+                    // MODE 2 : Soustraire un Registre (SUB r/m32, reg32)
+                    actual_code.push(0x29); // OpCode SUB registre à registre
+
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("kheb", destination, dest_spec.level, src, src_spec.level);
+                    ensure_supported_level("kheb", src, src_spec.level);
+
+                    let modrm = modrm_reg_reg(dest_base, src_base);
+                    actual_code.push(modrm);
+                }
+                _ => panic!("Kheb only supports numbers, Helix literals, or registers."),
+            }
+        } else if dest_spec.level == Level::Extreme {
+            match value {
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("kheb", destination, dest_spec.level, src, src_spec.level);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
+                    actual_code.push(0xE8);
+                    self.jump.push((
+                        actual_code.len(),
+                        Expression::Identifier("__helix_sub128".to_string()),
+                        self.in_kernel,
+                    ));
+                    actual_code.extend_from_slice(&[0x00, 0x00]);
+                }
+                Expression::Helix { ra, apophis } => {
+                    let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
+                    self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
+                    self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
+                    actual_code.push(0xE8);
+                    self.jump.push((
+                        actual_code.len(),
+                        Expression::Identifier("__helix_sub128".to_string()),
+                        self.in_kernel,
+                    ));
+                    actual_code.extend_from_slice(&[0x00, 0x00]);
+                }
+                _ => panic!("Kheb only supports Helix literals or registers for 128-bit."),
+            }
+        } else {
+            panic!(
+                "Kheb does not yet support registers beyond Extreme: %{} ({})",
+                destination, dest_spec.level
+            );
         }
     }
     pub fn duat(&mut self, actual_code: &mut Vec<u8>, phrase: &String, address: &u16) {
@@ -574,6 +767,31 @@ impl Emitter {
                             "Henek only supports Helix literals or registers for 128-bit registers."
                         ),
                     }
+                } else if dest_spec.level == Level::Xenith {
+                    match value {
+                        Expression::Register(src_name) => {
+                            let src_spec = parse_general_register(src_name);
+                            let src_base = match src_spec.kind {
+                                RegKind::General(base) => base,
+                                _ => unreachable!(),
+                            };
+                            ensure_same_level(
+                                "henek",
+                                destination,
+                                dest_spec.level,
+                                src_name,
+                                src_spec.level,
+                            );
+                            self.emit_mov_reg_reg(code, dest_base, src_base);
+                        }
+                        Expression::Helix { ra, apophis } => {
+                            let addr = self.alloc_xenith_literal(*ra, *apophis);
+                            self.emit_mov_reg_imm32(code, dest_base, addr as u32);
+                        }
+                        _ => panic!(
+                            "Henek only supports Helix literals or registers for 256-bit registers."
+                        ),
+                    }
                 } else {
                     panic!(
                         "Henek does not yet support registers beyond Extreme: %{} ({})",
@@ -618,6 +836,19 @@ impl Emitter {
                     code_actual.push(0x81); // Opcode ADD
                     code_actual.push(modrm_imm(dest_base, 0));
                     ensure_number_fits("sema", destination, dest_spec.level, *n);
+                    code_actual.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Helix { ra, apophis } => {
+                    ensure_helix_fits(
+                        "sema",
+                        destination,
+                        dest_spec.level,
+                        *ra as u128,
+                        *apophis as u128,
+                    );
+                    let n = ((*ra as i32) << 16) | (*apophis as i32);
+                    code_actual.push(0x81); // Opcode ADD
+                    code_actual.push(modrm_imm(dest_base, 0));
                     code_actual.extend_from_slice(&n.to_le_bytes());
                 }
                 Expression::Register(src) => {
@@ -674,6 +905,93 @@ impl Emitter {
         } else {
             panic!(
                 "Sema does not yet support registers beyond Extreme: %{} ({})",
+                destination, dest_spec.level
+            );
+        }
+    }
+
+    pub fn shesa(&mut self, code_actual: &mut Vec<u8>, destination: &String, value: &Expression) {
+        let dest_spec = parse_general_register(destination);
+        let dest_base = match dest_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+        if dest_spec.level <= Level::High {
+            code_actual.push(0x66); // Stabilisation 32 bits
+            ensure_supported_level("shesa", destination, dest_spec.level);
+            match value {
+                Expression::Number(n) => {
+                    let modrm = 0xC0 | (reg_code(dest_base) << 3) | reg_code(dest_base);
+                    ensure_number_fits("shesa", destination, dest_spec.level, *n);
+                    code_actual.push(0x69); // IMUL r32, r/m32, imm32
+                    code_actual.push(modrm);
+                    code_actual.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Helix { ra, apophis } => {
+                    let modrm = 0xC0 | (reg_code(dest_base) << 3) | reg_code(dest_base);
+                    ensure_helix_fits(
+                        "shesa",
+                        destination,
+                        dest_spec.level,
+                        *ra as u128,
+                        *apophis as u128,
+                    );
+                    let n = ((*ra as i32) << 16) | (*apophis as i32);
+                    code_actual.push(0x69);
+                    code_actual.push(modrm);
+                    code_actual.extend_from_slice(&n.to_le_bytes());
+                }
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("shesa", destination, dest_spec.level, src, src_spec.level);
+                    ensure_supported_level("shesa", src, src_spec.level);
+                    let modrm = 0xC0 | (reg_code(dest_base) << 3) | reg_code(src_base);
+                    code_actual.push(0x0F); // IMUL r32, r/m32
+                    code_actual.push(0xAF);
+                    code_actual.push(modrm);
+                }
+                _ => panic!("Shesa only supports numbers, Helix literals, or registers."),
+            }
+        } else if dest_spec.level == Level::Extreme {
+            match value {
+                Expression::Register(src) => {
+                    let src_spec = parse_general_register(src);
+                    let src_base = match src_spec.kind {
+                        RegKind::General(base) => base,
+                        _ => unreachable!(),
+                    };
+                    ensure_same_level("shesa", destination, dest_spec.level, src, src_spec.level);
+                    self.emit_mov_reg_reg(code_actual, RegBase::Di, dest_base);
+                    self.emit_mov_reg_reg(code_actual, RegBase::Si, src_base);
+                    code_actual.push(0xE8);
+                    self.jump.push((
+                        code_actual.len(),
+                        Expression::Identifier("__helix_mul128".to_string()),
+                        self.in_kernel,
+                    ));
+                    code_actual.extend_from_slice(&[0x00, 0x00]);
+                }
+                Expression::Helix { ra, apophis } => {
+                    let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
+                    self.emit_mov_reg_reg(code_actual, RegBase::Di, dest_base);
+                    self.emit_mov_reg_imm32(code_actual, RegBase::Si, addr as u32);
+                    code_actual.push(0xE8);
+                    self.jump.push((
+                        code_actual.len(),
+                        Expression::Identifier("__helix_mul128".to_string()),
+                        self.in_kernel,
+                    ));
+                    code_actual.extend_from_slice(&[0x00, 0x00]);
+                }
+                _ => panic!("Shesa only supports Helix literals or registers for 128-bit."),
+            }
+        } else {
+            panic!(
+                "Shesa does not yet support registers beyond Extreme: %{} ({})",
                 destination, dest_spec.level
             );
         }
@@ -747,6 +1065,10 @@ impl Emitter {
                 // Traduction de : sema %registre, valeur (ADD)
                 Instruction::Sema { destination, value } => {
                     self.sema(&mut actual_code, &destination, &value);
+                }
+                // Traduction de : shesa %registre, valeur (MUL)
+                Instruction::Shesa { destination, value } => {
+                    self.shesa(&mut actual_code, &destination, &value);
                 }
                 Instruction::Kherp => {
                     self.kherp(&mut actual_code);
@@ -823,6 +1145,19 @@ impl Emitter {
                                 actual_code.push(0x81); // OpCode universel avec nombre
                                 actual_code.push(modrm_imm(left_base, 7));
                                 ensure_number_fits("wdj", &left, left_spec.level, n);
+                                actual_code.extend_from_slice(&n.to_le_bytes());
+                            }
+                            Expression::Helix { ra, apophis } => {
+                                let n = ((ra as i32) << 16) | (apophis as i32);
+                                ensure_helix_fits(
+                                    "wdj",
+                                    &left,
+                                    left_spec.level,
+                                    ra as u128,
+                                    apophis as u128,
+                                );
+                                actual_code.push(0x81);
+                                actual_code.push(modrm_imm(left_base, 7));
                                 actual_code.extend_from_slice(&n.to_le_bytes());
                             }
                             Expression::Register(right_reg) => {
@@ -932,23 +1267,189 @@ impl Emitter {
         );
         let helix_add = vec![
             0x66, 0x60, // PUSHAD
+            // RA (0..7)
             0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
             0x66, 0x67, 0x03, 0x06, // ADD EAX, [ESI]
             0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
             0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
             0x66, 0x67, 0x13, 0x46, 0x04, // ADC EAX, [ESI+4]
             0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0x73, 0x0F, // JNC +15 (skip RA saturation)
+            0x66, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, // MOV EAX, 0xFFFFFFFF
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
             0xF8, // CLC
+            // Apophis (8..15)
             0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
             0x66, 0x67, 0x03, 0x46, 0x08, // ADD EAX, [ESI+8]
             0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
             0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
             0x66, 0x67, 0x13, 0x46, 0x0C, // ADC EAX, [ESI+12]
             0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x73, 0x10, // JNC +16 (skip Apophis saturation)
+            0x66, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, // MOV EAX, 0xFFFFFFFF
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
             0x66, 0x61, // POPAD
             0xC3, // RET
         ];
         stage2_code.extend_from_slice(&helix_add);
+
+        self.labels.insert(
+            "__helix_sub128".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let helix_sub = vec![
+            0x66, 0x60, // PUSHAD
+            0xF8, // CLC
+            // RA (0..7)
+            0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
+            0x66, 0x67, 0x2B, 0x06, // SUB EAX, [ESI]
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
+            0x66, 0x67, 0x1B, 0x46, 0x04, // SBB EAX, [ESI+4]
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0x73, 0x0C, // JNC +12 (skip RA zero)
+            0x66, 0x31, 0xC0, // XOR EAX, EAX
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0xF8, // CLC
+            // Apophis (8..15)
+            0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
+            0x66, 0x67, 0x2B, 0x46, 0x08, // SUB EAX, [ESI+8]
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
+            0x66, 0x67, 0x1B, 0x46, 0x0C, // SBB EAX, [ESI+12]
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x73, 0x0D, // JNC +13 (skip Apophis zero)
+            0x66, 0x31, 0xC0, // XOR EAX, EAX
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x66, 0x61, // POPAD
+            0xC3, // RET
+        ];
+        stage2_code.extend_from_slice(&helix_sub);
+
+        self.labels.insert(
+            "__helix_mul128".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let helix_mul = vec![
+            0x66, 0x60, // PUSHAD
+            // RA (0..7)
+            0x66, 0x31, 0xED, // XOR EBP, EBP (overflow flag)
+            0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
+            0x66, 0x67, 0xF7, 0x26, // MUL dword [ESI]
+            0x66, 0x89, 0xC3, // MOV EBX, EAX (low32)
+            0x66, 0x89, 0xD1, // MOV ECX, EDX (high32)
+            0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
+            0x66, 0x67, 0xF7, 0x66, 0x04, // MUL dword [ESI+4]
+            0x66, 0x0B, 0xEA, // OR EBP, EDX (p1_hi)
+            0x66, 0x50, // PUSH EAX (p1_lo)
+            0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
+            0x66, 0x67, 0xF7, 0x26, // MUL dword [ESI]
+            0x66, 0x0B, 0xEA, // OR EBP, EDX (p2_hi)
+            0x66, 0x50, // PUSH EAX (p2_lo)
+            0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
+            0x66, 0x67, 0xF7, 0x66, 0x04, // MUL dword [ESI+4]
+            0x66, 0x0B, 0xEA, // OR EBP, EDX (p3_hi)
+            0x66, 0x0B, 0xE8, // OR EBP, EAX (p3_lo)
+            0x66, 0x5A, // POP EDX (p2_lo)
+            0x66, 0x58, // POP EAX (p1_lo)
+            0x66, 0x01, 0xC1, // ADD ECX, EAX
+            0x66, 0x83, 0xD5, 0x00, // ADC EBP, 0
+            0x66, 0x01, 0xD1, // ADD ECX, EDX
+            0x66, 0x83, 0xD5, 0x00, // ADC EBP, 0
+            0x66, 0x85, 0xED, // TEST EBP, EBP
+            0x75, 0x0B, // JNZ saturate_ra
+            0x66, 0x67, 0x89, 0x1F, // MOV [EDI], EBX
+            0x66, 0x67, 0x89, 0x4F, 0x04, // MOV [EDI+4], ECX
+            0xEB, 0x0F, // JMP done_ra
+            0x66, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, // saturate_ra: MOV EAX, 0xFFFFFFFF
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            // Apophis (8..15)
+            0x66, 0x31, 0xED, // XOR EBP, EBP (overflow flag)
+            0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
+            0x66, 0x67, 0xF7, 0x66, 0x08, // MUL dword [ESI+8]
+            0x66, 0x89, 0xC3, // MOV EBX, EAX (low32)
+            0x66, 0x89, 0xD1, // MOV ECX, EDX (high32)
+            0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
+            0x66, 0x67, 0xF7, 0x66, 0x0C, // MUL dword [ESI+12]
+            0x66, 0x0B, 0xEA, // OR EBP, EDX (p1_hi)
+            0x66, 0x50, // PUSH EAX (p1_lo)
+            0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
+            0x66, 0x67, 0xF7, 0x66, 0x08, // MUL dword [ESI+8]
+            0x66, 0x0B, 0xEA, // OR EBP, EDX (p2_hi)
+            0x66, 0x50, // PUSH EAX (p2_lo)
+            0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
+            0x66, 0x67, 0xF7, 0x66, 0x0C, // MUL dword [ESI+12]
+            0x66, 0x0B, 0xEA, // OR EBP, EDX (p3_hi)
+            0x66, 0x0B, 0xE8, // OR EBP, EAX (p3_lo)
+            0x66, 0x5A, // POP EDX (p2_lo)
+            0x66, 0x58, // POP EAX (p1_lo)
+            0x66, 0x01, 0xC1, // ADD ECX, EAX
+            0x66, 0x83, 0xD5, 0x00, // ADC EBP, 0
+            0x66, 0x01, 0xD1, // ADD ECX, EDX
+            0x66, 0x83, 0xD5, 0x00, // ADC EBP, 0
+            0x66, 0x85, 0xED, // TEST EBP, EBP
+            0x75, 0x0C, // JNZ saturate_apo
+            0x66, 0x67, 0x89, 0x5F, 0x08, // MOV [EDI+8], EBX
+            0x66, 0x67, 0x89, 0x4F, 0x0C, // MOV [EDI+12], ECX
+            0xEB, 0x10, // JMP done_apo
+            0x66, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, // saturate_apo: MOV EAX, 0xFFFFFFFF
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x66, 0x61, // POPAD
+            0xC3, // RET
+        ];
+        stage2_code.extend_from_slice(&helix_mul);
+
+        self.labels.insert(
+            "__helix_and128".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let helix_and = vec![
+            0x66, 0x60, // PUSHAD
+            0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
+            0x66, 0x67, 0x23, 0x06, // AND EAX, [ESI]
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
+            0x66, 0x67, 0x23, 0x46, 0x04, // AND EAX, [ESI+4]
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
+            0x66, 0x67, 0x23, 0x46, 0x08, // AND EAX, [ESI+8]
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
+            0x66, 0x67, 0x23, 0x46, 0x0C, // AND EAX, [ESI+12]
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x66, 0x61, // POPAD
+            0xC3, // RET
+        ];
+        stage2_code.extend_from_slice(&helix_and);
+
+        self.labels.insert(
+            "__helix_or128".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let helix_or = vec![
+            0x66, 0x60, // PUSHAD
+            0x66, 0x67, 0x8B, 0x07, // MOV EAX, [EDI]
+            0x66, 0x67, 0x0B, 0x06, // OR EAX, [ESI]
+            0x66, 0x67, 0x89, 0x07, // MOV [EDI], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x04, // MOV EAX, [EDI+4]
+            0x66, 0x67, 0x0B, 0x46, 0x04, // OR EAX, [ESI+4]
+            0x66, 0x67, 0x89, 0x47, 0x04, // MOV [EDI+4], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x08, // MOV EAX, [EDI+8]
+            0x66, 0x67, 0x0B, 0x46, 0x08, // OR EAX, [ESI+8]
+            0x66, 0x67, 0x89, 0x47, 0x08, // MOV [EDI+8], EAX
+            0x66, 0x67, 0x8B, 0x47, 0x0C, // MOV EAX, [EDI+12]
+            0x66, 0x67, 0x0B, 0x46, 0x0C, // OR EAX, [ESI+12]
+            0x66, 0x67, 0x89, 0x47, 0x0C, // MOV [EDI+12], EAX
+            0x66, 0x61, // POPAD
+            0xC3, // RET
+        ];
+        stage2_code.extend_from_slice(&helix_or);
 
         self.labels.insert(
             "__helix_cmp128".to_string(),
