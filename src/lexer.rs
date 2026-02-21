@@ -20,10 +20,10 @@ pub enum Token {
     OpenParen,  // (
     CloseParen, // )
     Equals,
-    Plus,  // +
-    Minus, // -
-    Star,  // *
-    Slash, // /
+    Plus,   // +
+    Minus,  // -
+    Star,   // *
+    Slash,  // /
     Dollar, // $ (L'adresse actuelle)
     // End of File
     Eof,
@@ -62,7 +62,6 @@ impl<'a> Lexer<'a> {
             Some(c) => c,
             None => return Token::Eof,
         };
-
         // 3. Classify the character
         match c {
             '=' => Token::Equals,
@@ -94,11 +93,24 @@ impl<'a> Lexer<'a> {
                 let mut string_content = String::new();
                 while let Some(&next_char) = self.input.peek() {
                     if next_char != '"' {
-                        // On ajoute les lettres tant qu'on ne trouve pas le guillemet de fin
-                        string_content.push(self.input.next().unwrap());
+                        let c = self.input.next().unwrap();
+                        // --- LE DÉTECTEUR D'ÉCHAPPEMENT ---
+                        if c == '\\' {
+                            if let Some(escaped) = self.input.next() {
+                                match escaped {
+                                    'n' => string_content.push('\n'), // 0x0A
+                                    'r' => string_content.push('\r'), // 0x0D
+                                    't' => string_content.push('\t'), // 0x09
+                                    '\\' => string_content.push('\\'),
+                                    '"' => string_content.push('"'),
+                                    _ => string_content.push(escaped),
+                                }
+                            }
+                        } else {
+                            string_content.push(c);
+                        }
                     } else {
-                        // On "mange" le guillemet de fin et on arrête la boucle
-                        self.input.next();
+                        self.input.next(); // Ferme les guillemets
                         break;
                     }
                 }
@@ -174,7 +186,7 @@ impl<'a> Lexer<'a> {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
                     | "kheb" | "henet" | "mer" | "her" | "kher" | "her_ankh" | "kher_ankh"
-                    | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen" | "rdtsc" => {
+                    | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen" | "rdtsc"  |"kherp" => {
                         Token::Verb(word)
                     }
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type

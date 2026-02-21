@@ -130,4 +130,5 @@ pub enum Instruction {
     Return {
         resultat: Expression,
     },
+    Kherp,
 }

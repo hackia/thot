@@ -48,8 +48,48 @@ impl<'a> Parser<'a> {
     }
     // Niveau 1 : Gère l'addition et la soustraction (Les opérations "lentes")
     fn parse_expression(&mut self) -> Expression {
-        let mut gauche = self.parse_terme(); // On commence par chercher les multiplications
-
+        let mut gauche = match self.current_token.clone() {
+            Token::Number(n) => {
+                self.advance();
+                Expression::Number(n)
+            }
+            Token::Register(r) => {
+                self.advance();
+                Expression::Register(r)
+            }
+            Token::Identifier(i) => {
+                self.advance();
+                // Le Scribe doit vérifier si ce nom est une constante connue !
+                if let Some(&valeur) = self.constantes.get(&i) {
+                    Expression::Number(valeur) // On substitue le nom par sa valeur
+                } else {
+                    Expression::Identifier(i) // Sinon, on garde le nom (c'est un label)
+                }
+            }
+            Token::StringLiteral(s) => {
+                self.advance();
+                Expression::StringLiteral(s)
+            }
+            // --- LA PIÈCE MANQUANTE ---
+            Token::Dollar => {
+                self.advance(); // On consomme le '$'
+                Expression::CurrentAddress
+            }
+            Token::Minus => {
+                self.advance(); // On consomme le '-'
+                if let Token::Number(n) = self.current_token {
+                    let valeur_negative = -n;
+                    self.advance();
+                    Expression::Number(valeur_negative)
+                } else {
+                    panic!("Erreur : Le signe '-' doit être suivi d'un nombre.");
+                }
+            }
+            _ => panic!(
+                "Syntax Error: Expression attendue, trouvé {:?}",
+                self.current_token
+            ),
+        };
         while matches!(self.current_token, Token::Plus | Token::Minus) {
             let operateur = self.current_token.clone();
             self.advance();
@@ -245,7 +285,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Instruction::Rdtsc
             }
-            // Traduction de : henet %regi&&&&&&&&&&&&&&&&&&&&&&stre, valeur (AND)
+            // Traduction de : henet %registre, valeur (AND)
             Token::Verb(v) if v == "henet" => {
                 self.advance();
                 let destination = match &self.current_token {
@@ -330,7 +370,11 @@ impl<'a> Parser<'a> {
                     cible: self.parse_expression(),
                 }
             }
-
+            // Dans src/parser.rs, fonction parse_instruction
+            Token::Verb(v) if v == "kherp" => {
+                self.advance(); // On consomme "kherp"
+                Instruction::Kherp
+            }
             // Traduction du saut inconditionnel : neheh cible
             Token::Verb(v) if v == "neheh" => {
                 self.advance(); // Consomme 'neheh'

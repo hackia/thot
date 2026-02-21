@@ -1,38 +1,39 @@
-; --- INITIALISATION ---
-wab                             ; Purifie l'écran
-nama compteur = 0               ; Notre index 'i'
-nama cycles_debut = 0
-nama cycles_fin = 0
+; --- STAGE 1 : L'INITIATEUR ---
+henek %ka, 0
+henek %ds, %ka
+kherp                ; On charge la RAM
+jena noyau           ; On saute dans le Stage 2
 
-per "MESURES DE PERFS AMENTYS :\n"
+; --- STAGE 2 : LE NOYAU ---
+noyau:
+    wab              ; Nettoie l'écran
+    per "MESURE PERF AMENTYS :\r\n"
 
-boucle_mesure:
-    ; 1. Top départ (Zep Tepi)
-    rdtsc                       ; Lit les cycles -> %ka
-    kheper %ka, [cycles_debut]  ; Sauvegarde le temps de départ
+    ; Réservation d'espace en RAM (Le Noun)
+    nama t_debut = 0
+    nama t_fin = 0
 
-    ; 2. L'action à mesurer (Afficher i)
-    sena %ka, [compteur]        ; Charge 'i'
-    sema %ka, 48                ; Convertit en ASCII (0 -> '0')
-    per %ka                     ; Affiche le chiffre
-    per " "                     ; Espace pour la lisibilité
+    ; 1. Zep Tepi (Top Chrono)
+    rdtsc
+    kheper %ka, t_debut
 
-    ; 3. Top fin
-    rdtsc                       ; Lit les cycles -> %ka
-    kheper %ka, [cycles_fin]    ; Sauvegarde le temps de fin
+    ; 2. Ce qu'on mesure (Le fardeau)
+    per "\t[+] Affichage de ce texte..."
 
-    ; 4. Calcul du coût de l'affichage
-    sena %ka, [cycles_fin]
-    sena %ib, [cycles_debut]
-    kheb %ka, %ib               ; %ka = cycles_fin - cycles_debut
+    ; 3. Fin du Chrono
+    rdtsc
+    kheper %ka, t_fin
 
-    ; --- LOGIQUE DE BOUCLE ---
-    sena %ka, [compteur]
-    sema %ka, 1                 ; i++
-    kheper %ka, [compteur]
+    ; 4. La Balance (Calcul de t_fin - t_debut)
+    sena %ka, t_fin
+    sena %ib, t_debut
+    kheb %ka, %ib        ; %ka contient maintenant la différence de cycles !
 
-    wdj %ka, 10                 ; On s'arrête à 10 ?
-    isfet boucle_mesure         ; Si i != 10, on recommence
+    ; 5. Affichage du résultat
+    per "\r\n\t[=] CYCLES CPU : 0x"
+    jena print_hex_32    ; Appel de notre nouvelle routine de traduction
+; --- À la fin de ton noyau ---
+    per "\r\nFIN DU TEST."
 
-per "\nFIN DES TESTS."
-neheh $                        ; Arrête le temps
+fin_du_temps:
+    neheh fin_du_temps   ; Le processeur restera bloqué ici en boucle infinie&&&&&

@@ -1,12 +1,10 @@
 mod ast;
-mod boot;
 mod elf;
 mod emitter;
 mod lexer;
 mod parser;
 
 use crate::ast::Instruction;
-use crate::boot::Naos;
 use crate::elf::Sarcophage;
 use crate::emitter::Emitter;
 use crate::lexer::Lexer;
@@ -70,10 +68,7 @@ pub fn tisser_tablettes(
                 }
                 // 2. On lit le parchemin
                 let code_inclus = fs::read_to_string(&chemin_complet).unwrap_or_else(|_| {
-                    panic!(
-                        "The Scribe could not find the tablet: {:?}",
-                        chemin_complet
-                    )
+                    panic!("The Scribe could not find the tablet: {:?}", chemin_complet)
                 });
 
                 // 3. On relance les Yeux et l'Esprit sur ce nouveau texte
@@ -134,10 +129,10 @@ fn main() {
             // 4. Émetteur (Le Marteau)
             // On lui donne maintenant les instructions fusionnées, pures de tout 'dema'
             let emetteur = Emitter::new(instructions_fusionnees, kbd_layout);
-            let code_machine = emetteur.generer_binaire();
+            let code_machine = emetteur.generer_binaire(matches.get_flag("boot"));
 
             let binaire_final = if matches.get_flag("boot") {
-                Naos::emballer(&code_machine)
+                code_machine
             } else {
                 Sarcophage::emballer(&code_machine)
             };
