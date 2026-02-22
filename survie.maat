@@ -1,0 +1,24 @@
+; --- STAGE 1 : L'INITIATEUR ---
+jena noyau
+
+; --- STAGE 2 : LE NOYAU ---
+noyau:
+    per "AMENTYS SURVIVAL TEST (V0.3)\r\n"
+    per "[1] Initialisation du noyau\r\n"
+
+    ; Etat initial pur (Noun)
+    nama etat_init = 1:0
+
+    ; Allocation d'un Helix 128 (buffer local)
+    henek %eka, 0:0
+    ; Injection de l'etat initial depuis le Noun
+    sena %eka, etat_init
+
+    per "[2] Declenchement du fault (Sekhmet)\r\n"
+    ; En mode protege, l'appel BIOS provoque #GP
+    kherp
+
+    per "[ERREUR] Phoenix non declenche\r\n"
+
+attente:
+    neheh attente
