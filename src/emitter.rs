@@ -7,7 +7,19 @@ use crate::register::{
 use std::collections::HashMap;
 const STAGE_ONE: isize = 0x7C00;
 const STAGE_TWO: isize = 0x7E00;
-const CURSOR_NOUN: u16 = 0x8000;
+const NOUN_BASE: u16 = 0x8000;
+const KERNEL_CURSOR_ADDR: u32 = 0x9000;
+const KERNEL_CUR_PLAN_ADDR: u32 = 0x9004;
+const HAPI_BITMAP_ADDR: u32 = 0x9008;
+const HAPI_PAGES_ADDR: u32 = 0x900C;
+const HAPI_HEAP_ADDR: u32 = 0x9010;
+const HAPI_OWNER_ADDR: u32 = 0x9014;
+const CAS_DIR_ADDR: u32 = 0x9018;
+const CAS_DIR_CAP_ADDR: u32 = 0x901C;
+const NOUN_HEADER_SIZE: u16 = 0x30;
+const NOUN_TYPE_DATA: u32 = 1;
+const NOUN_PERM_RO: u32 = 1;
+const STACK_TOP: u32 = 0x0009_FC00;
 
 pub struct Emitter {
     instructions: Vec<Instruction>,
@@ -42,7 +54,7 @@ impl Emitter {
             variables: HashMap::new(),
             dictionnaire_cas: HashMap::new(),
             jump: Vec::new(),
-            cursor_noun: CURSOR_NOUN,
+            cursor_noun: NOUN_BASE,
             labels: HashMap::new(),
         }
     }
@@ -109,8 +121,6 @@ impl Emitter {
         const CODE_SEL: u16 = 0x08;
         const DATA_SEL: u16 = 0x10;
         const VGA_SEL: u16 = 0x18;
-        const CURSOR_ADDR: u16 = 0x9000;
-        const STACK_TOP: u32 = 0x0009_FC00;
 
         let mut code = Vec::new();
 
@@ -156,8 +166,23 @@ impl Emitter {
 
         // cursor = 0 (dword)
         code.extend_from_slice(&[0xC7, 0x05]);
-        code.extend_from_slice(&(CURSOR_ADDR as u32).to_le_bytes());
+        code.extend_from_slice(&KERNEL_CURSOR_ADDR.to_le_bytes());
         code.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // kernel vars init (current plan, hapi bitmap base, hapi pages, hapi heap base)
+        for addr in [
+            KERNEL_CUR_PLAN_ADDR,
+            HAPI_BITMAP_ADDR,
+            HAPI_PAGES_ADDR,
+            HAPI_HEAP_ADDR,
+            HAPI_OWNER_ADDR,
+            CAS_DIR_ADDR,
+            CAS_DIR_CAP_ADDR,
+        ] {
+            code.extend_from_slice(&[0xC7, 0x05]);
+            code.extend_from_slice(&addr.to_le_bytes());
+            code.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        }
 
         // LIDT [disp16] (patch later)
         code.extend_from_slice(&[0x67, 0x0F, 0x01, 0x1E, 0x00, 0x00]);
@@ -170,28 +195,47 @@ impl Emitter {
         if level != Level::Extreme {
             panic!("Helix literal storage is only supported for Extreme (128) right now.");
         }
-        let addr = self.cursor_noun;
         let mut block = vec![0u8; level.bytes() as usize];
         let ra64 = (ra as u64).to_le_bytes();
         let ap64 = (apophis as u64).to_le_bytes();
         block[0..8].copy_from_slice(&ra64);
         block[8..16].copy_from_slice(&ap64);
-        self.segment_noun.extend_from_slice(&block);
-        self.cursor_noun += block.len() as u16;
-        addr
+        self.alloc_noun_object(NOUN_TYPE_DATA, &block, 0)
     }
 
     fn alloc_xenith_literal(&mut self, ra: u16, apophis: u16) -> u16 {
-        let addr = self.cursor_noun;
         let mut block = vec![0u8; Level::Xenith.bytes() as usize];
         let ra64 = (ra as u64).to_le_bytes();
         let ap64 = (apophis as u64).to_le_bytes();
         block[0..8].copy_from_slice(&ra64);
         block[8..16].copy_from_slice(&ap64);
         // Reste du bloc (16..32) = 0
-        self.segment_noun.extend_from_slice(&block);
-        self.cursor_noun += block.len() as u16;
-        addr
+        self.alloc_noun_object(NOUN_TYPE_DATA, &block, 0)
+    }
+
+    fn alloc_noun_object(&mut self, obj_type: u32, payload: &[u8], entrypoint: u32) -> u16 {
+        let hash = blake3::hash(payload);
+        if let Some(addr) = self.dictionnaire_cas.get(&hash) {
+            return *addr;
+        }
+        while self.cursor_noun % 4 != 0 {
+            self.segment_noun.push(0);
+            self.cursor_noun += 1;
+        }
+        let header_addr = self.cursor_noun;
+        let payload_addr = header_addr + NOUN_HEADER_SIZE;
+        let mut header = Vec::with_capacity(NOUN_HEADER_SIZE as usize);
+        header.extend_from_slice(&obj_type.to_le_bytes());
+        header.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        header.extend_from_slice(&NOUN_PERM_RO.to_le_bytes());
+        header.extend_from_slice(&entrypoint.to_le_bytes());
+        header.extend_from_slice(hash.as_bytes());
+        debug_assert_eq!(header.len(), NOUN_HEADER_SIZE as usize);
+        self.segment_noun.extend_from_slice(&header);
+        self.segment_noun.extend_from_slice(payload);
+        self.dictionnaire_cas.insert(hash, payload_addr);
+        self.cursor_noun = payload_addr + payload.len() as u16;
+        payload_addr
     }
     pub fn kherankh(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
         // OpCode pour JLE (Jump if Less or Equal)
@@ -223,11 +267,10 @@ impl Emitter {
     pub fn per(&mut self, actual_code: &mut Vec<u8>, message: &Expression) {
         match message {
             Expression::StringLiteral(s) => {
-                // 1. On enregistre le texte dans le Noun (Secteur 3+)
-                let addr = self.cursor_noun;
-                self.segment_noun.extend_from_slice(s.as_bytes());
-                self.segment_noun.push(0); // Signe du Silence
-                self.cursor_noun += (s.len() + 1) as u16;
+                // 1. On enregistre le texte dans le Noun (payload immuable)
+                let mut payload = s.as_bytes().to_vec();
+                payload.push(0); // Signe du Silence
+                let addr = self.alloc_noun_object(NOUN_TYPE_DATA, &payload, 0);
 
                 // 2. On génère le code machine pour l'afficher
                 if self.pmode_enabled {
@@ -929,18 +972,7 @@ impl Emitter {
             }
             _ => panic!("Type not supported in the Noun."),
         };
-
-        let hash = blake3::hash(&contenu_brut);
-
-        let adresse = if let Some(addr) = self.dictionnaire_cas.get(&hash) {
-            *addr
-        } else {
-            let addr = self.cursor_noun;
-            self.segment_noun.extend_from_slice(&contenu_brut);
-            self.dictionnaire_cas.insert(hash, addr);
-            self.cursor_noun += contenu_brut.len() as u16;
-            addr
-        };
+        let adresse = self.alloc_noun_object(NOUN_TYPE_DATA, &contenu_brut, 0);
         self.variables.insert(name.to_string(), adresse);
     }
     fn henek(&mut self, code: &mut Vec<u8>, destination: &String, value: &Expression) {
@@ -1261,7 +1293,6 @@ impl Emitter {
         let mut pmode_inserted = false;
         let mut pmode_lgdt_patch: Option<usize> = None;
         let mut pmode_lidt_patch: Option<usize> = None;
-        let mut pmode_entry_addr: Option<u32> = None;
 
         // Le Stage 1 est à 0x7C00, le Stage 2 commence à 0x7E00 (juste après 512 octets)
         let base_stage1 = STAGE_ONE;
@@ -1390,12 +1421,11 @@ impl Emitter {
                     if (nom == "kernel" || nom == "noyau") && !pmode_inserted {
                         let base_off = actual_code.len();
                         let prologue_base = base_actuelle + base_off as isize;
-                        let (prologue, lgdt_off, lidt_off, pmode_entry_off) =
+                        let (prologue, lgdt_off, lidt_off, _pmode_entry_off) =
                             self.emit_pmode_prologue(prologue_base);
                         actual_code.extend_from_slice(&prologue);
                         pmode_lgdt_patch = Some(base_off + lgdt_off);
                         pmode_lidt_patch = Some(base_off + lidt_off);
-                        pmode_entry_addr = Some((prologue_base + pmode_entry_off as isize) as u32);
                         pmode_inserted = true;
                         self.pmode_enabled = true;
                     }
@@ -1655,6 +1685,122 @@ impl Emitter {
         stage2_code.extend_from_slice(&xenith_cmp);
 
         self.labels.insert(
+            "__hapi_init".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let hapi_init = vec![
+            0xA3, 0x08, 0x90, 0x00, 0x00, 0x89, 0x0D, 0x0C, 0x90, 0x00, 0x00, 0x89,
+            0xCA, 0x83, 0xC2, 0x07, 0xC1, 0xEA, 0x03, 0x89, 0xC3, 0x01, 0xD3,
+            0x83, 0xC3, 0x03, 0x83, 0xE3, 0xFC, 0x89, 0x1D, 0x14, 0x90, 0x00, 0x00,
+            0x89, 0xCE, 0xC1, 0xE6, 0x02, 0x01, 0xF3, 0x81, 0xC3, 0xFF, 0x0F, 0x00, 0x00,
+            0x81, 0xE3, 0x00, 0xF0, 0xFF, 0xFF, 0x89, 0x1D, 0x10, 0x90, 0x00, 0x00, 0x89,
+            0xC7, 0x31, 0xC0, 0x89, 0xD1, 0xF3, 0xAA, 0x8B, 0x3D, 0x14, 0x90, 0x00, 0x00,
+            0x8B, 0x0D, 0x0C, 0x90, 0x00, 0x00, 0x31, 0xC0, 0xF3, 0xAB, 0xC3,
+        ];
+        stage2_code.extend_from_slice(&hapi_init);
+
+        self.labels.insert(
+            "__hapi_alloc".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let hapi_alloc = vec![
+            0x8B, 0x35, 0x08, 0x90, 0x00, 0x00, 0x8B, 0x2D, 0x0C, 0x90, 0x00,
+            0x00, 0x8B, 0x1D, 0x10, 0x90, 0x00, 0x00, 0x31, 0xFF, 0x39, 0xEF,
+            0x73, 0x33, 0x89, 0xF8, 0xC1, 0xE8, 0x03, 0x89, 0xF9, 0x83, 0xE1,
+            0x07, 0xB2, 0x01, 0xD2, 0xE2, 0x8A, 0x34, 0x06, 0x84, 0xD6, 0x75,
+            0x1B, 0x08, 0xD6, 0x88, 0x34, 0x06, 0xA1, 0x04, 0x90, 0x00, 0x00,
+            0x8B, 0x15, 0x14, 0x90, 0x00, 0x00, 0x89, 0x04, 0xBA, 0x89, 0xF8,
+            0xC1, 0xE0, 0x0C, 0x01, 0xD8, 0xC3, 0x47, 0xEB, 0xC9, 0x31, 0xC0,
+            0xC3,
+        ];
+        stage2_code.extend_from_slice(&hapi_alloc);
+
+        self.labels.insert(
+            "__hapi_free".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let hapi_free = vec![
+            0x8B, 0x1D, 0x10, 0x90, 0x00, 0x00, 0x39, 0xD8, 0x72, 0x43, 0x29,
+            0xD8, 0xC1, 0xE8, 0x0C, 0x8B, 0x35, 0x08, 0x90, 0x00, 0x00, 0x8B,
+            0x2D, 0x14, 0x90, 0x00, 0x00, 0x8B, 0x15, 0x04, 0x90, 0x00, 0x00,
+            0x85, 0xD2, 0x74, 0x08, 0x8B, 0x4C, 0x85, 0x00, 0x39, 0xD1, 0x75,
+            0x20, 0xC7, 0x44, 0x85, 0x00, 0x00, 0x00, 0x00, 0x00, 0x89, 0xC1,
+            0xC1, 0xE9, 0x03, 0x83, 0xE0, 0x07, 0xB2, 0x01, 0x88, 0xC1, 0xD2,
+            0xE2, 0xF6, 0xD2, 0x8A, 0x34, 0x0E, 0x20, 0xD6, 0x88, 0x34, 0x0E,
+            0xC3,
+        ];
+        stage2_code.extend_from_slice(&hapi_free);
+
+        self.labels.insert(
+            "__hapi_transfer".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let hapi_transfer = vec![
+            0x8B, 0x1D, 0x10, 0x90, 0x00, 0x00, 0x39, 0xD8, 0x72, 0x21, 0x29,
+            0xD8, 0xC1, 0xE8, 0x0C, 0x8B, 0x2D, 0x14, 0x90, 0x00, 0x00, 0x8B,
+            0x15, 0x04, 0x90, 0x00, 0x00, 0x85, 0xD2, 0x74, 0x08, 0x8B, 0x4C,
+            0x85, 0x00, 0x39, 0xD1, 0x75, 0x04, 0x89, 0x7C, 0x85, 0x00, 0xC3,
+        ];
+        stage2_code.extend_from_slice(&hapi_transfer);
+
+        self.labels.insert(
+            "__cas_init".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let cas_init = vec![
+            0xA3, 0x18, 0x90, 0x00, 0x00, 0x89, 0x0D, 0x1C, 0x90, 0x00, 0x00,
+            0x89, 0xCA, 0xC1, 0xE2, 0x05, 0x89, 0xCB, 0xC1, 0xE3, 0x03, 0x01,
+            0xDA, 0x89, 0xC7, 0x31, 0xC0, 0x89, 0xD1, 0xF3, 0xAA, 0xC3,
+        ];
+        stage2_code.extend_from_slice(&cas_init);
+
+        self.labels.insert(
+            "__cas_get".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let cas_get = vec![
+            0x8B, 0x1D, 0x18, 0x90, 0x00, 0x00, 0x85, 0xDB, 0x74, 0x48, 0x8B,
+            0x0D, 0x1C, 0x90, 0x00, 0x00, 0x85, 0xC9, 0x74, 0x3E, 0x89, 0xCA,
+            0x4A, 0x8B, 0x06, 0x21, 0xD0, 0x89, 0xC7, 0x89, 0xF5, 0x83, 0xF9,
+            0x00, 0x74, 0x2E, 0x89, 0xF8, 0xC1, 0xE0, 0x03, 0x8D, 0x04, 0x80,
+            0x8D, 0x04, 0x03, 0x83, 0x38, 0x00, 0x74, 0x1E, 0x51, 0x57, 0x50,
+            0x89, 0xEE, 0x89, 0xC7, 0xB9, 0x20, 0x00, 0x00, 0x00, 0xFC, 0xF3,
+            0xA6, 0x58, 0x5F, 0x59, 0x74, 0x06, 0x47, 0x21, 0xD7, 0x49, 0xEB,
+            0xD1, 0x8B, 0x40, 0x20, 0xC3, 0x31, 0xC0, 0xC3,
+        ];
+        stage2_code.extend_from_slice(&cas_get);
+
+        self.labels.insert(
+            "__cas_put".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let cas_put = vec![
+            0x57, 0x51, 0x8B, 0x1D, 0x18, 0x90, 0x00, 0x00, 0x85, 0xDB, 0x74,
+            0x70, 0x8B, 0x0D, 0x1C, 0x90, 0x00, 0x00, 0x85, 0xC9, 0x74, 0x66,
+            0x89, 0xCA, 0x4A, 0x8B, 0x06, 0x21, 0xD0, 0x89, 0xC7, 0x89, 0xF5,
+            0x83, 0xF9, 0x00, 0x74, 0x56, 0x89, 0xF8, 0xC1, 0xE0, 0x03, 0x8D,
+            0x04, 0x80, 0x8D, 0x04, 0x03, 0x83, 0x38, 0x00, 0x74, 0x1A, 0x51,
+            0x57, 0x50, 0x89, 0xEE, 0x89, 0xC7, 0xB9, 0x20, 0x00, 0x00, 0x00,
+            0xFC, 0xF3, 0xA6, 0x58, 0x5F, 0x59, 0x74, 0x2B, 0x47, 0x21, 0xD7,
+            0x49, 0xEB, 0xD1, 0x51, 0x57, 0x50, 0x89, 0xEE, 0x89, 0xC7, 0xB9,
+            0x20, 0x00, 0x00, 0x00, 0xFC, 0xF3, 0xA4, 0x58, 0x5F, 0x59, 0x8B,
+            0x14, 0x24, 0x8B, 0x74, 0x24, 0x04, 0x89, 0x70, 0x20, 0x89, 0x50,
+            0x24, 0x89, 0xF0, 0x83, 0xC4, 0x08, 0xC3, 0x8B, 0x40, 0x20, 0x83,
+            0xC4, 0x08, 0xC3, 0x83, 0xC4, 0x08, 0x31, 0xC0, 0xC3,
+        ];
+        stage2_code.extend_from_slice(&cas_put);
+
+        self.labels.insert(
+            "__cas_hash_eq".to_string(),
+            base_stage2 + (stage2_code.len() as isize),
+        );
+        let cas_hash_eq = vec![
+            0xB9, 0x20, 0x00, 0x00, 0x00, 0xFC, 0xF3, 0xA6, 0x31, 0xC0, 0x75,
+            0x05, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3,
+        ];
+        stage2_code.extend_from_slice(&cas_hash_eq);
+
+        self.labels.insert(
             "__helix_sub128".to_string(),
             base_stage2 + (stage2_code.len() as isize),
         );
@@ -1797,14 +1943,31 @@ impl Emitter {
         if pmode_inserted {
             // --- Sekhmet / Phenix : ISR de resurrection ---
             let isr_offset = stage2_code.len();
-            let pmode_entry_addr =
-                pmode_entry_addr.expect("Phoenix requires a protected-mode entry point");
+            let isr_len = 13usize;
+            let phoenix_addr = (base_stage2 + isr_offset as isize + isr_len as isize) as u32;
             let mut isr_phoenix = Vec::new();
             isr_phoenix.push(0xFA); // CLI
-            isr_phoenix.push(0xEA); // JMP FAR ptr16:32
-            isr_phoenix.extend_from_slice(&pmode_entry_addr.to_le_bytes());
-            isr_phoenix.extend_from_slice(&0x08u16.to_le_bytes()); // code selector
+            isr_phoenix.push(0xBC); // MOV ESP, imm32
+            isr_phoenix.extend_from_slice(&STACK_TOP.to_le_bytes());
+            isr_phoenix.push(0xB8); // MOV EAX, imm32
+            isr_phoenix.extend_from_slice(&phoenix_addr.to_le_bytes());
+            isr_phoenix.extend_from_slice(&[0xFF, 0xE0]); // JMP EAX
             stage2_code.extend_from_slice(&isr_phoenix);
+
+            self.labels.insert(
+                "__phoenix_rebirth".to_string(),
+                base_stage2 + (stage2_code.len() as isize),
+            );
+            let phoenix_rebirth = vec![
+                0x8B, 0x1D, 0x04, 0x90, 0x00, 0x00, 0x85, 0xDB, 0x74, 0x37, 0x8B,
+                0x73, 0x70, 0x8D, 0x7E, 0x10, 0x8D, 0x73, 0x40, 0xB9, 0x20, 0x00,
+                0x00, 0x00, 0xFC, 0xF3, 0xA6, 0x75, 0x24, 0x8B, 0x73, 0x70, 0x83,
+                0xC6, 0x30, 0x8B, 0x7B, 0x74, 0x8B, 0x4B, 0x78, 0x89, 0xCA, 0xC1,
+                0xE9, 0x02, 0xF3, 0xA5, 0x89, 0xD1, 0x83, 0xE1, 0x03, 0xF3, 0xA4,
+                0xBC, 0x00, 0xFC, 0x09, 0x00, 0x8B, 0x43, 0x7C, 0xFF, 0xE0, 0xFA,
+                0xF4, 0xEB, 0xFC,
+            ];
+            stage2_code.extend_from_slice(&phoenix_rebirth);
 
             // --- IDT (32 exceptions) ---
             let idt_offset = stage2_code.len();
