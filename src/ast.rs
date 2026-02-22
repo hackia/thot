@@ -28,20 +28,22 @@ impl fmt::Display for Registry {
     }
 }
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum RegistryError {
     AddressOverflow,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum Level {
-    Base = 8,    // 8bits
-    Medium = 16, // 16bits
-    High = 32,   // 32bits
-    Very = 64,   // 64bits
+    Base = 8,      // 8bits
+    Medium = 16,   // 16bits
+    High = 32,     // 32bits
+    Very = 64,     // 64bits
     Extreme = 128, // 128bits
     Xenith = 256,  // 256bits
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(dead_code)]
 pub enum Registry {
     Ka(Level),
     Ba(Level),
@@ -50,6 +52,8 @@ pub enum Registry {
     Si(Level),
     Di(Level),
 }
+
+#[allow(dead_code)]
 impl Level {
     pub const fn bits(self) -> u16 {
         self as u16
@@ -108,6 +112,8 @@ impl Level {
         };
     }
 }
+
+#[allow(dead_code)]
 impl Registry {
     pub fn try_new(variant: fn(Level) -> Registry, level: Level) -> Result<Self, RegistryError> {
         let temp_reg = variant(level);
