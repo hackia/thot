@@ -45,7 +45,8 @@ The register name encodes the Helix size. Sizes are total Helix width (Ra + Apop
 | Extreme | e      | 128              | 64               |
 | Xenith  | x      | 256              | 128              |
 
-Examples: `%ba` (Base), `%mba` (Medium), `%hba` (High), `%vba` (Very), `%eba` (Extreme), `%xba` (Xenith). Same scheme for `%ka`, `%ib`, `%da`, `%si`, `%di`.
+Examples: `%ba` (Base), `%mba` (Medium), `%hba` (High), `%vba` (Very), `%eba` (Extreme), `%xba` (Xenith). Same scheme
+for `%ka`, `%ib`, `%da`, `%si`, `%di`.
 
 Rules: operations between different sizes are rejected, and overflow is a compile-time error.
 

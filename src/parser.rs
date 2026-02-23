@@ -1,8 +1,8 @@
 use crate::ast::{Expression, Instruction, Level};
 use crate::lexer::{Lexer, Token};
 use crate::register::{
-    ensure_helix_fits, ensure_number_fits, ensure_same_level, parse_general_register,
-    parse_register, RegKind, RegBase,
+    RegBase, RegKind, ensure_helix_fits, ensure_number_fits, ensure_same_level,
+    parse_general_register, parse_register,
 };
 
 #[derive(Clone)]
@@ -150,7 +150,6 @@ impl<'a> Parser<'a> {
         };
         self.advance();
         while matches!(self.current_token, Token::Star | Token::Slash) {
-
             let operateur = self.current_token.clone();
             self.advance();
             // Pour la multiplication, on ne regarde que les valeurs immédiates (pas d'addition ici)
@@ -172,7 +171,9 @@ impl<'a> Parser<'a> {
     // Analyse une instruction complète
     pub fn parse_instruction(&mut self) -> Instruction {
         match self.current_token() {
-            Token::Verb(v) if v == "neheh" || v == "ankh" || v == "isfet" || v == "jena" => {
+            Token::Verb(v)
+                if v == "neheh" || v == "ankh" || v == "isfet" || v == "jena" || v == "dja" =>
+            {
                 let verbe = v.clone();
                 self.advance();
                 let cible = self.parse_expression(); // parse_expression gère déjà $ ou Identifiant !
@@ -181,6 +182,24 @@ impl<'a> Parser<'a> {
                     "neheh" => Instruction::Neheh { cible },
                     "ankh" => Instruction::Ankh { cible },
                     "isfet" => Instruction::Isfet { cible },
+                    // Dans la fonction parse_instruction :
+                    "dja" => {
+                        self.advance(); // On saute 'dja'
+                        // On attend le segment (ex: 0x08)
+                        let segment = match self.current_token() {
+                            Token::Number(n) => n as u16,
+                            _ => panic!("Error: 'dja' is waiting for a segment (number)"),
+                        };
+                        self.advance();
+
+                        // On attend les deux points ':'
+                        self.expect_token(Token::Colon);
+
+                        // On récupère la cible (label ou adresse)
+                        let cible = self.parse_expression();
+
+                        Instruction::Dja { segment, cible }
+                    }
                     _ => Instruction::Jena { cible }, // jena
                 }
             }
@@ -275,10 +294,7 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                Instruction::Henek {
-                    destination,
-                    value,
-                }
+                Instruction::Henek { destination, value }
             }
             // Fais la même chose pour ankh, isfet, jena, her, etc.
             Token::Verb(v) if v == "smen" => {
@@ -355,9 +371,7 @@ impl<'a> Parser<'a> {
                 self.advance(); // Consomme 'dema'
                 let chemin = match self.parse_expression() {
                     Expression::StringLiteral(s) => s,
-                    _ => panic!(
-                        "Syntax Error: 'dema' waits for the path of the scroll in quotes"
-                    ),
+                    _ => panic!("Syntax Error: 'dema' waits for the path of the scroll in quotes"),
                 };
                 Instruction::Dema { chemin }
             }
@@ -425,11 +439,9 @@ impl<'a> Parser<'a> {
                         destination, dest_spec.level
                     );
                 }
-                Instruction::Henet {
-                    destination,
-                    value,
-                }
+                Instruction::Henet { destination, value }
             }
+
             // Traduction de : mer %registre, valeur (OR)
             Token::Verb(v) if v == "mer" => {
                 self.advance();
@@ -490,10 +502,7 @@ impl<'a> Parser<'a> {
                         destination, dest_spec.level
                     );
                 }
-                Instruction::Mer {
-                    destination,
-                    value,
-                }
+                Instruction::Mer { destination, value }
             }
             Token::Verb(v) if v == "duat" => {
                 self.advance(); // Consomme 'duat'
@@ -689,10 +698,7 @@ impl<'a> Parser<'a> {
                         destination, dest_spec.level
                     );
                 }
-                Instruction::Sema {
-                    destination,
-                    value,
-                }
+                Instruction::Sema { destination, value }
             }
             // Traduction de : shesa %registre, valeur
             Token::Verb(v) if v == "shesa" => {
@@ -757,10 +763,7 @@ impl<'a> Parser<'a> {
                         destination, dest_spec.level
                     );
                 }
-                Instruction::Shesa {
-                    destination,
-                    value,
-                }
+                Instruction::Shesa { destination, value }
             }
 
             // Traduction de : wdj %registre, valeur

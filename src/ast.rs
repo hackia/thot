@@ -280,7 +280,10 @@ pub enum Instruction {
     Push {
         cible: Expression,
     },
-
+    Dja {
+        segment: u16,
+        cible: Expression,
+    },
     // pop %registre
     Pop {
         destination: String,
