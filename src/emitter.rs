@@ -21,6 +21,21 @@ const NOUN_TYPE_DATA: u32 = 1;
 const NOUN_PERM_RO: u32 = 1;
 const STACK_TOP: u32 = 0x0009_FC00;
 
+pub struct Maat {
+    bin: Vec<u8>,
+}
+
+impl Maat {
+    #[must_use]
+    pub fn new() -> Self {
+        Self { bin: Vec::new() }
+    }
+
+    pub fn add(&mut self, code: &[u8]) {
+        self.bin.extend_from_slice(code);
+    }
+}
+
 pub struct Emitter {
     instructions: Vec<Instruction>,
     kbd_layout: String,
@@ -267,25 +282,53 @@ impl Emitter {
     pub fn per(&mut self, actual_code: &mut Vec<u8>, message: &Expression) {
         match message {
             Expression::StringLiteral(s) => {
-                // 1. On enregistre le texte dans le Noun (payload immuable)
+                // --- Code existant pour les phrases ---
                 let mut payload = s.as_bytes().to_vec();
-                payload.push(0); // Signe du Silence
+                payload.push(0);
                 let addr = self.alloc_noun_object(NOUN_TYPE_DATA, &payload, 0);
 
-                // 2. On génère le code machine pour l'afficher
                 if self.pmode_enabled {
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                 } else {
-                    actual_code.push(0xBE); // MOV SI, adresse_du_texte
+                    actual_code.push(0xBE);
                     actual_code.extend_from_slice(&addr.to_le_bytes());
                 }
 
                 self.emit_rel16_prefix(actual_code);
-                actual_code.push(0xE8); // CALL std_print
+                actual_code.push(0xE8);
                 let cible = Expression::Identifier("std_print".to_string());
                 self.record_jump(actual_code, &cible);
             }
-            _ => { /* Gestion des registres si besoin */ }
+            Expression::Register(r) => {
+                let spec = parse_general_register(r);
+
+                // On vérifie si c'est bien %ka (Base)
+                if spec.kind == RegKind::General(RegBase::Ka) && spec.level == Level::Base {
+                    if self.pmode_enabled {
+                        // Mode Protégé : On écrit directement dans la mémoire VGA
+                        actual_code.extend_from_slice(&[
+                            0x57, // PUSH EDI (Sauvegarde)
+                            0x8B, 0x3D, 0x00, 0x90, 0x00,
+                            0x00, // MOV EDI, [0x9000] (Position curseur)
+                            0xD1, 0xE7, // SHL EDI, 1 (2 octets par caractère)
+                            0xB4, 0x0F, // MOV AH, 0x0F (Couleur : Blanc sur Noir)
+                            0x65, 0x66, 0x89, 0x07, // MOV [GS:EDI], AX (Manifestation !)
+                            0xFF, 0x05, 0x00, 0x90, 0x00,
+                            0x00, // INC dword [0x9000] (Avance curseur)
+                            0x5F, // POP EDI (Restauration)
+                        ]);
+                    } else {
+                        // Mode Réel : On utilise le rituel du BIOS (Int 0x10)
+                        actual_code.extend_from_slice(&[
+                            0xB4, 0x0E, // MOV AH, 0x0E (Fonction Teletype)
+                            0xCD, 0x10, // INT 0x10 (Appel BIOS)
+                        ]);
+                    }
+                } else {
+                    panic!("Le Scribe ne sait manifester que %ka pour le moment.");
+                }
+            }
+            _ => panic!("Type de message inconnu pour le verbe 'per'."),
         }
     }
     pub fn mer(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
@@ -780,7 +823,22 @@ impl Emitter {
         // 3. Le Sélecteur de Segment (2 octets)
         actual_code.extend_from_slice(&segment.to_le_bytes());
     }
+    pub fn emit_sekhmet_handler(&mut self, buffer: &mut Vec<u8>) {
+        // 1. Sauvegarde immédiate de l'état du chaos (Isfet)
+        buffer.push(0x60); // PUSHAD : Sauvegarde tous les registres 32 bits
 
+        // 2. Identification du Plan fautif
+        // On récupère l'adresse du PCB (Plan Control Block) actuel
+        // KERNEL_CUR_PLAN_ADDR est déjà défini à 0x9004 dans ton code
+        buffer.extend_from_slice(&[0xA1, 0x04, 0x90, 0x00, 0x00]); // MOV EAX, [0x9004]
+
+        // 3. Appel à la logique de Renaissance (Le Phénix)
+        // On passe l'adresse du Plan dans EAX pour que le noyau sache qui faire renaître
+        self.record_jump(buffer, &Expression::Identifier("reborn".to_string()));
+
+        buffer.push(0x61); // POPAD (au cas où on reviendrait, mais le Phénix réinitialise tout)
+        buffer.push(0xCF); // IRETD : Retour d'interruption protégé
+    }
     // Ajoute cette fonction d'aide dans impl Emitter :
     fn record_jump_far(&mut self, code: &mut Vec<u8>, cible: Expression) {
         self.jump.push(JumpPatch {
@@ -982,7 +1040,7 @@ impl Emitter {
         code_actual.push(0x8C); // OpCode pour JL (Saut si plus petit)
         self.record_jump(code_actual, cible);
     }
-    fn nama(&mut self, name: &String, value: &Expression) {
+    pub fn nama(&mut self, name: &String, value: &Expression) {
         let contenu_brut = match value {
             Expression::Helix { ra, apophis } => {
                 let n = ((*ra as i32) << 16) | (*apophis as i32);
@@ -998,7 +1056,7 @@ impl Emitter {
         let adresse = self.alloc_noun_object(NOUN_TYPE_DATA, &contenu_brut, 0);
         self.variables.insert(name.to_string(), adresse);
     }
-    fn henek(&mut self, code: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn henek(&mut self, code: &mut Vec<u8>, destination: &String, value: &Expression) {
         let dest_spec = parse_register(destination);
         match dest_spec.kind {
             RegKind::Segment(seg) => {
