@@ -8,7 +8,7 @@ impl fmt::Display for Level {
             Level::High => "High",
             Level::Very => "Very",
             Level::Extreme => "Extreme",
-            Level::Xenith => "Xenith",
+            Level::Zenith => "Zenith",
         };
         write!(f, "{} ({}-bit)", label, self.bits())
     }
@@ -40,7 +40,7 @@ pub enum Level {
     High = 32,     // 32bits
     Very = 64,     // 64bits
     Extreme = 128, // 128bits
-    Xenith = 256,  // 256bits
+    Zenith = 256,  // 256bits
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)]
@@ -70,7 +70,7 @@ impl Level {
             Level::High => 2,
             Level::Very => 3,
             Level::Extreme => 4,
-            Level::Xenith => 5,
+            Level::Zenith => 5,
         }
     }
 
@@ -80,7 +80,7 @@ impl Level {
 
     /// Vérifie si on est au sommet
     pub fn is_max(&self) -> bool {
-        matches!(self, Level::Xenith)
+        matches!(self, Level::Zenith)
     }
 
     /// Vérifie si on est déjà tout en bas
@@ -88,22 +88,22 @@ impl Level {
         matches!(self, Level::Base)
     }
 
-    /// Passe au niveau supérieur (s'arrête à Xenith)
+    /// Passe au niveau supérieur (s'arrête à Zenith)
     pub fn up(&mut self) {
         *self = match self {
             Level::Base => Level::Medium,
             Level::Medium => Level::High,
             Level::High => Level::Very,
             Level::Very => Level::Extreme,
-            Level::Extreme => Level::Xenith,
-            Level::Xenith => Level::Xenith, // Reste au max
+            Level::Extreme => Level::Zenith,
+            Level::Zenith => Level::Zenith, // Reste au max
         };
     }
 
     /// Passe au niveau inférieur (s'arrête à Base)
     pub fn down(&mut self) {
         *self = match self {
-            Level::Xenith => Level::Extreme,
+            Level::Zenith => Level::Extreme,
             Level::Extreme => Level::Very,
             Level::Very => Level::High,
             Level::High => Level::Medium,
@@ -247,7 +247,7 @@ impl Registry {
             | Registry::Di(l) => l.down(),
         }
     }
-    pub fn to_u8(&self) -> u8 {
+    pub fn to_u8(self) -> u8 {
         let reg_id = self.reg_id();
         let level_index = self.level().index();
 
@@ -278,11 +278,11 @@ pub enum Instruction {
     Rdtsc, // Lit le compteur de cycles CPU
     // push %registre ou push nombre
     Push {
-        cible: Expression,
+        target: Expression,
     },
     Dja {
         segment: u16,
-        cible: Expression,
+        target: Expression,
     },
     // pop %registre
     Pop {
@@ -308,7 +308,7 @@ pub enum Instruction {
         value: Expression,
     },
     Dema {
-        chemin: String,
+        path: String,
     },
     // henet %registre, valeur (AND logique)
     Henet {
@@ -322,28 +322,28 @@ pub enum Instruction {
     },
     // Change String en Expression pour tous les sauts
     Neheh {
-        cible: Expression,
+        target: Expression,
     },
     Ankh {
-        cible: Expression,
+        target: Expression,
     },
     Isfet {
-        cible: Expression,
+        target: Expression,
     },
     Jena {
-        cible: Expression,
+        target: Expression,
     },
     Her {
-        cible: Expression,
+        target: Expression,
     },
     Kher {
-        cible: Expression,
+        target: Expression,
     },
     HerAnkh {
-        cible: Expression,
+        target: Expression,
     },
     KherAnkh {
-        cible: Expression,
+        target: Expression,
     },
     // duat "Ma phrase", adresse
     Duat {

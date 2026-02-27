@@ -25,7 +25,7 @@ pub enum Token {
     Minus,  // -
     Star,   // *
     Slash,  // /
-    Dollar, // $ (L'adresse actuelle)
+    Dollar, // $ (Current address)
     // End of File
     Eof,
     OpenBracket,
@@ -132,14 +132,12 @@ impl<'a> Lexer<'a> {
             // Si c'est un chiffre -> C'est le début d'un HELIX (Ra:Apophis)
             '0'..='9' => {
                 let mut is_hex = false;
-                if c == '0' {
-                    if let Some(&next_char) = self.input.peek() {
-                        if next_char == 'x' || next_char == 'X' {
+                if c == '0'
+                    && let Some(&next_char) = self.input.peek()
+                        && (next_char == 'x' || next_char == 'X') {
                             is_hex = true;
                             self.input.next(); // On mange le 'x'
                         }
-                    }
-                }
 
                 // 1. On lit la première force (Ra)
                 let mut ra_str = String::new();
@@ -148,7 +146,7 @@ impl<'a> Lexer<'a> {
                 }
                 while let Some(&next_char) = self.input.peek() {
                     if (is_hex && next_char.is_ascii_hexdigit())
-                        || (!is_hex && next_char.is_digit(10))
+                        || (!is_hex && next_char.is_ascii_digit())
                     {
                         ra_str.push(self.input.next().unwrap());
                     } else {
@@ -169,7 +167,7 @@ impl<'a> Lexer<'a> {
                     // On lit la seconde force (Apophis)
                     let mut apo_str = String::new();
                     while let Some(&next_char) = self.input.peek() {
-                        if next_char.is_digit(10) {
+                        if next_char.is_ascii_digit() {
                             apo_str.push(self.input.next().unwrap());
                         } else {
                             break;
@@ -203,8 +201,8 @@ impl<'a> Lexer<'a> {
                     "sokh" | "henek" | "sema" | "wdj" | "duat" | "ankh" | "sena" | "neheh"
                     | "kheper" | "per" | "return" | "sedjem" | "wab" | "jena" | "isfet"
                     | "kheb" | "henet" | "mer" | "shesa" | "her" | "kher" | "her_ankh"
-                    | "kher_ankh" | "dema" | "push" | "pop" | "in" | "out" | "nama"
-                    | "smen" | "rdtsc" | "kherp" | "dja" => Token::Verb(word),
+                    | "kher_ankh" | "dema" | "push" | "pop" | "in" | "out" | "nama" | "smen"
+                    | "rdtsc" | "kherp" | "dja" => Token::Verb(word),
                     _ => Token::Identifier(word), // Otherwise, it's a variable/type
                 }
             }

@@ -35,7 +35,7 @@ fn level_from_prefix(prefix: &str) -> Option<Level> {
         "h" => Some(Level::High),
         "v" => Some(Level::Very),
         "e" => Some(Level::Extreme),
-        "x" => Some(Level::Xenith),
+        "x" => Some(Level::Zenith),
         _ => None,
     }
 }
@@ -68,7 +68,6 @@ pub fn parse_register(name: &str) -> RegSpec {
     if matches!(kind, RegKind::Segment(_)) && level != Level::Base {
         panic!("Segment registers cannot be prefixed: %{name}");
     }
-
     RegSpec { kind, level }
 }
 
@@ -119,19 +118,13 @@ pub fn ensure_same_level(
     right_level: Level,
 ) {
     if left_level != right_level {
-        panic!(
-            "Size mismatch in {}: %{} ({}) vs %{} ({})",
-            context, left, left_level, right, right_level
-        );
+        panic!("Size mismatch in {context}: %{left} ({left_level}) vs %{right} ({right_level})",);
     }
 }
 
 pub fn ensure_supported_level(context: &str, reg: &str, level: Level) {
     if level > Level::High {
-        panic!(
-            "Unsupported register size in {}: %{} ({})",
-            context, reg, level
-        );
+        panic!("Unsupported register size in {context}: %{reg} ({level})",);
     }
 }
 
@@ -144,18 +137,11 @@ pub fn channel_max(level: Level) -> u128 {
     }
 }
 
-pub fn ensure_helix_fits(
-    context: &str,
-    reg: &str,
-    level: Level,
-    ra: u128,
-    apophis: u128,
-) {
+pub fn ensure_helix_fits(context: &str, reg: &str, level: Level, ra: u128, apophis: u128) {
     let max = channel_max(level);
     if ra > max || apophis > max {
         panic!(
-            "Overflow in {} for %{} ({}): ra={} apophis={} (max per channel = {})",
-            context, reg, level, ra, apophis, max
+            "Overflow in {context} for %{reg} ({level}): ra={ra} apophis={apophis} (max per channel = {max})",
         );
     }
 }
@@ -169,9 +155,6 @@ pub fn ensure_number_fits(context: &str, reg: &str, level: Level, value: i32) {
     let min: i128 = -(1i128 << (bits - 1));
     let v = value as i128;
     if v < min || v > max {
-        panic!(
-            "Overflow in {} for %{} ({}): value={} (min={} max={})",
-            context, reg, level, value, min, max
-        );
+        panic!("Overflow in {context} for %{reg} ({level}): value={value} (min={min} max={max})",);
     }
 }

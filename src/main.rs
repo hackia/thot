@@ -6,7 +6,7 @@ mod parser;
 mod register;
 
 use crate::ast::Instruction;
-use crate::elf::Sarcophage;
+use crate::elf::Sarcophagus;
 use crate::emitter::Emitter;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -52,7 +52,7 @@ fn cli() -> Command {
 }
 
 // Le Tisserand : Il parcourt les instructions et remplace les "dema" par le vrai code
-pub fn tisser_tablettes(
+pub fn tiss_tablet(
     instructions_brutes: Vec<Instruction>,
     dossier_courant: &Path,
 ) -> Vec<Instruction> {
@@ -61,9 +61,9 @@ pub fn tisser_tablettes(
     for instruction in instructions_brutes {
         match instruction {
             Instruction::Smen { .. } => instructions_finales.push(instruction),
-            Instruction::Dema { chemin } => {
+            Instruction::Dema { path } => {
                 // 1. On trouve le chemin absolu du nouveau fichier
-                let mut chemin_complet = dossier_courant.join(&chemin);
+                let mut chemin_complet = dossier_courant.join(&path);
                 if chemin_complet.extension().is_none() {
                     chemin_complet.set_extension("maat");
                 }
@@ -83,7 +83,7 @@ pub fn tisser_tablettes(
 
                 // 4. RÉCURSION : On tisse ce nouveau fichier au cas où IL contienne aussi des 'dema' !
                 let dossier_parent = chemin_complet.parent().unwrap_or(Path::new(""));
-                let sous_instructions_tissees = tisser_tablettes(sous_instructions, dossier_parent);
+                let sous_instructions_tissees = tiss_tablet(sous_instructions, dossier_parent);
 
                 // 5. On fusionne les instructions tissées dans notre ligne temporelle principale
                 instructions_finales.extend(sous_instructions_tissees);
@@ -99,8 +99,8 @@ fn main() {
     let matches = cli().get_matches();
 
     // On utilise if let imbriqués (plus stable sur toutes les versions de Rust)
-    if let Some(file) = matches.get_one::<String>("file") {
-        if let Some(o) = matches.get_one::<String>("output") {
+    if let Some(file) = matches.get_one::<String>("file")
+        && let Some(o) = matches.get_one::<String>("output") {
             let kbd_layout = matches
                 .get_one::<String>("kbd")
                 .expect("failed to get kbd")
@@ -125,7 +125,7 @@ fn main() {
             let dossier_principal = chemin_fichier_principal.parent().unwrap_or(Path::new(""));
 
             // On aplatit l'arbre syntaxique en résolvant toutes les inclusions
-            let instructions_fusionnees = tisser_tablettes(instructions, dossier_principal);
+            let instructions_fusionnees = tiss_tablet(instructions, dossier_principal);
 
             // 4. Émetteur (Le Marteau)
             // On lui donne maintenant les instructions fusionnées, pures de tout 'dema'
@@ -137,21 +137,17 @@ fn main() {
             let binary = if matches.get_flag("boot") {
                 bin
             } else {
-                Sarcophage::emballer(&bin)
+                Sarcophagus::packaging(&bin)
             };
-
-            // 6. Écriture sur le disque dur
-            fs::write(o, binary).expect("Erreur lors de l'écriture du fichier");
+            fs::write(o, binary).expect("Failed to write bin");
 
             #[cfg(unix)]
             {
                 if !matches.get_flag("boot") {
-                    // On ne met les droits d'exécution que pour les ELF, un disque brut s'en fiche
                     use std::os::unix::fs::PermissionsExt;
                     fs::set_permissions(o, fs::Permissions::from_mode(0o777))
                         .expect("failed to set execute permissions");
                 }
             }
         }
-    }
 }

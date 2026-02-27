@@ -9,7 +9,7 @@ use crate::register::{
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current_token: Token,
-    constantes: std::collections::HashMap<String, i32>,
+    constant: std::collections::HashMap<String, i32>,
 }
 
 impl<'a> Parser<'a> {
@@ -19,7 +19,7 @@ impl<'a> Parser<'a> {
         Parser {
             lexer,
             current_token: first_token,
-            constantes: std::collections::HashMap::new(),
+            constant: std::collections::HashMap::new(),
         }
     }
     pub fn current_token(&self) -> Token {
@@ -66,7 +66,7 @@ impl<'a> Parser<'a> {
             Token::Identifier(i) => {
                 self.advance();
                 // Le Scribe doit vérifier si ce nom est une constante connue !
-                if let Some(&valeur) = self.constantes.get(&i) {
+                if let Some(&valeur) = self.constant.get(&i) {
                     Expression::Number(valeur) // On substitue le nom par sa valeur
                 } else {
                     Expression::Identifier(i) // Sinon, on garde le nom (c'est un label)
@@ -131,7 +131,7 @@ impl<'a> Parser<'a> {
             },
             // 3. Dans parse_terme ou parse_expression, substitue les noms par leur valeur
             Token::Identifier(nom) => {
-                if let Some(&val) = self.constantes.get(nom) {
+                if let Some(&val) = self.constant.get(nom) {
                     Expression::Number(val) // Si c'est une constante smen, on renvoie son nombre !
                 } else {
                     Expression::Identifier(nom.clone()) // Sinon c'est une variable nama
@@ -176,12 +176,12 @@ impl<'a> Parser<'a> {
             {
                 let verbe = v.clone();
                 self.advance();
-                let cible = self.parse_expression(); // parse_expression gère déjà $ ou Identifiant !
+                let target = self.parse_expression(); // parse_expression gère déjà $ ou Identifiant !
 
                 match verbe.as_str() {
-                    "neheh" => Instruction::Neheh { cible },
-                    "ankh" => Instruction::Ankh { cible },
-                    "isfet" => Instruction::Isfet { cible },
+                    "neheh" => Instruction::Neheh { target },
+                    "ankh" => Instruction::Ankh { target },
+                    "isfet" => Instruction::Isfet { target },
                     // Dans la fonction parse_instruction :
                     "dja" => {
                         self.advance(); // On saute 'dja'
@@ -195,25 +195,25 @@ impl<'a> Parser<'a> {
                         // On attend les deux points ':'
                         self.expect_token(Token::Colon);
 
-                        // On récupère la cible (label ou adresse)
-                        let cible = self.parse_expression();
+                        // On récupère la target (label ou adresse)
+                        let target = self.parse_expression();
 
-                        Instruction::Dja { segment, cible }
+                        Instruction::Dja { segment, target }
                     }
-                    _ => Instruction::Jena { cible }, // jena
+                    _ => Instruction::Jena { target }, // jena
                 }
             }
 
             Token::Verb(v) if v == "her" || v == "kher" || v == "her_ankh" || v == "kher_ankh" => {
                 let type_saut = v.clone();
                 self.advance();
-                let cible = self.parse_expression();
+                let target = self.parse_expression();
 
                 match type_saut.as_str() {
-                    "her" => Instruction::Her { cible },
-                    "kher" => Instruction::Kher { cible },
-                    "her_ankh" => Instruction::HerAnkh { cible },
-                    _ => Instruction::KherAnkh { cible },
+                    "her" => Instruction::Her { target },
+                    "kher" => Instruction::Kher { target },
+                    "her_ankh" => Instruction::HerAnkh { target },
+                    _ => Instruction::KherAnkh { target },
                 }
             }
 
@@ -307,7 +307,7 @@ impl<'a> Parser<'a> {
                 self.expect_token(Token::Equals);
                 let valeur_expr = self.parse_expression();
                 if let Expression::Number(n) = valeur_expr {
-                    self.constantes.insert(nom.clone(), n); // On mémorise la constante !
+                    self.constant.insert(nom.clone(), n); // On mémorise la constante !
                     Instruction::Smen { nom, valeur: n }
                 } else {
                     panic!("Smen requires a fixed numerical value (Zep Tepi)");
@@ -369,11 +369,11 @@ impl<'a> Parser<'a> {
             // Dans src/parser.rs (dans la méthode parse_instruction)
             Token::Verb(v) if v == "dema" => {
                 self.advance(); // Consomme 'dema'
-                let chemin = match self.parse_expression() {
+                let path = match self.parse_expression() {
                     Expression::StringLiteral(s) => s,
                     _ => panic!("Syntax Error: 'dema' waits for the path of the scroll in quotes"),
                 };
-                Instruction::Dema { chemin }
+                Instruction::Dema { path }
             }
             Token::Verb(v) if v == "rdtsc" => {
                 self.advance();
@@ -520,11 +520,11 @@ impl<'a> Parser<'a> {
             // Dans src/parser.rs, dans parse_instruction
             Token::Verb(v) if v == "push" => {
                 self.advance();
-                let cible = self.parse_expression();
-                if let Expression::Register(r) = &cible {
+                let target = self.parse_expression();
+                if let Expression::Register(r) = &target {
                     let _ = parse_general_register(r);
                 }
-                Instruction::Push { cible }
+                Instruction::Push { target }
             }
             Token::Verb(v) if v == "pop" => {
                 self.advance();
@@ -567,16 +567,16 @@ impl<'a> Parser<'a> {
                 self.advance(); // Consomme le mot 'wab'
                 Instruction::Wab
             }
-            // Traduction du saut conditionnel : ankh cible
+            // Traduction du saut conditionnel : ankh target
             Token::Verb(v) if v == "ankh" => {
                 self.advance(); // Consomme 'ankh'
-                let _cible = match &self.current_token {
+                let _target = match &self.current_token {
                     Token::Identifier(i) => i.clone(),
                     _ => panic!("Syntax Error: 'ankh' requires a target label"),
                 };
-                self.advance(); // Consomme la cible
+                self.advance(); // Consomme la target
                 Instruction::Ankh {
-                    cible: self.parse_expression(),
+                    target: self.parse_expression(),
                 }
             }
             // Dans src/parser.rs, fonction parse_instruction
@@ -584,16 +584,16 @@ impl<'a> Parser<'a> {
                 self.advance(); // On consomme "kherp"
                 Instruction::Kherp
             }
-            // Traduction du saut inconditionnel : neheh cible
+            // Traduction du saut inconditionnel : neheh target
             Token::Verb(v) if v == "neheh" => {
                 self.advance(); // Consomme 'neheh'
-                if let Token::Identifier(_cible) = self.current_token.clone() {
-                    self.advance(); // Consomme la cible (SANS CHERCHER DE ':')
+                if let Token::Identifier(_target) = self.current_token.clone() {
+                    self.advance(); // Consomme la target (SANS CHERCHER DE ':')
                     Instruction::Neheh {
-                        cible: self.parse_expression(),
+                        target: self.parse_expression(),
                     }
                 } else {
-                    panic!("Syntax Error: 'neheh' attend une cible.");
+                    panic!("Syntax Error: 'neheh' attend une target.");
                 }
             }
             Token::Verb(v) if v == "sedjem" => {
@@ -675,7 +675,7 @@ impl<'a> Parser<'a> {
                             "Sema for 128-bit registers only accepts Helix literals or registers."
                         ),
                     }
-                } else if dest_spec.level == Level::Xenith {
+                } else if dest_spec.level == Level::Zenith {
                     match &value {
                         Expression::Register(src) => {
                             let src_spec = parse_general_register(src);
@@ -868,17 +868,17 @@ impl<'a> Parser<'a> {
 
                 Instruction::Nama { name, value }
             }
-            // Traduction du saut conditionnel : isfet cible (Saut si Différent)
+            // Traduction du saut conditionnel : isfet target (Saut si Différent)
             Token::Verb(v) if v == "isfet" => {
                 self.advance(); // Consomme 'isfet'
-                let _cible = match &self.current_token {
+                let _target = match &self.current_token {
                     Token::Identifier(i) => i.clone(),
-                    _ => panic!("Syntax Error: 'isfet' exige une etiquette cible"),
+                    _ => panic!("Syntax Error: 'isfet' exige une etiquette target"),
                 };
                 self.advance();
 
                 Instruction::Isfet {
-                    cible: self.parse_expression(),
+                    target: self.parse_expression(),
                 }
             }
             // Traduction de : kheb %registre, valeur&

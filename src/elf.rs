@@ -1,10 +1,7 @@
-// Fichier : src/elf.rs
+pub struct Sarcophagus;
 
-pub struct Sarcophage;
-
-impl Sarcophage {
-    // Emballe le code binaire brut dans un fichier exécutable ELF 64-bit
-    pub fn emballer(code_machine: &[u8]) -> Vec<u8> {
+impl Sarcophagus {
+    pub fn packaging(code_machine: &[u8]) -> Vec<u8> {
         let mut binaire_final = Vec::new();
 
         // L'en-tête ELF (120 octets). 
@@ -44,8 +41,8 @@ impl Sarcophage {
         binaire_final.extend_from_slice(&elf_header);
 
         // On calcule la taille totale (120 octets d'en-tête + la taille de notre code)
-        let taille_totale = (120 + code_machine.len()) as u64;
-        let bytes_taille = taille_totale.to_le_bytes();
+        let taille_total = (120 + code_machine.len()) as u64;
+        let bytes_taille = taille_total.to_le_bytes();
 
         // On patch le Program Header pour lui dire exactement combien d'octets charger en RAM
         binaire_final[96..104].copy_from_slice(&bytes_taille);  // Taille du fichier

@@ -21,29 +21,14 @@ const NOUN_TYPE_DATA: u32 = 1;
 const NOUN_PERM_RO: u32 = 1;
 const STACK_TOP: u32 = 0x0009_FC00;
 
-pub struct Maat {
-    bin: Vec<u8>,
-}
-
-impl Maat {
-    #[must_use]
-    pub fn new() -> Self {
-        Self { bin: Vec::new() }
-    }
-
-    pub fn add(&mut self, code: &[u8]) {
-        self.bin.extend_from_slice(code);
-    }
-}
-
 pub struct Emitter {
     instructions: Vec<Instruction>,
     kbd_layout: String,
     in_kernel: bool,
-    pmode_enabled: bool,
+    protected_mode_enabled: bool,
     segment_noun: Vec<u8>,
     variables: HashMap<String, u16>,
-    dictionnaire_cas: HashMap<blake3::Hash, u16>,
+    dictionary_cas: HashMap<blake3::Hash, u16>,
     jump: Vec<JumpPatch>,
     cursor_noun: u16,
     labels: HashMap<String, isize>,
@@ -52,22 +37,21 @@ pub struct Emitter {
 #[derive(Clone)]
 struct JumpPatch {
     offset: usize,
-    cible: Expression,
+    target: Expression,
     kernel: bool,
     size: usize,
 }
 
 impl Emitter {
-    // On charge l'Émetteur avec l'Arbre Syntaxique (AST)
     pub fn new() -> Self {
         Emitter {
             instructions: Vec::new(),
             kbd_layout: String::new(),
             in_kernel: false,
-            pmode_enabled: false,
+            protected_mode_enabled: false,
             segment_noun: Vec::new(),
             variables: HashMap::new(),
-            dictionnaire_cas: HashMap::new(),
+            dictionary_cas: HashMap::new(),
             jump: Vec::new(),
             cursor_noun: NOUN_BASE,
             labels: HashMap::new(),
@@ -95,7 +79,7 @@ impl Emitter {
 
     fn emit_rep_movsd_4(&self, code: &mut Vec<u8>) {
         // MOV ECX, 4 ; CLD ; REP MOVSD
-        if self.pmode_enabled {
+        if self.protected_mode_enabled {
             code.extend_from_slice(&[0xB9, 0x04, 0x00, 0x00, 0x00]);
             code.push(0xFC); // CLD
             code.extend_from_slice(&[0xF3, 0xA5]);
@@ -107,7 +91,7 @@ impl Emitter {
     }
 
     fn emit_op32_prefix(&self, code: &mut Vec<u8>) {
-        if !self.pmode_enabled {
+        if !self.protected_mode_enabled {
             code.push(0x66);
         }
     }
@@ -117,11 +101,11 @@ impl Emitter {
         let _ = code;
     }
 
-    fn record_jump(&mut self, code: &mut Vec<u8>, cible: &Expression) {
-        let size = if self.pmode_enabled { 4 } else { 2 };
+    fn record_jump(&mut self, code: &mut Vec<u8>, target: &Expression) {
+        let size = if self.protected_mode_enabled { 4 } else { 2 };
         self.jump.push(JumpPatch {
             offset: code.len(),
-            cible: cible.clone(),
+            target: target.clone(),
             kernel: self.in_kernel,
             size,
         });
@@ -218,8 +202,8 @@ impl Emitter {
         self.alloc_noun_object(NOUN_TYPE_DATA, &block, 0)
     }
 
-    fn alloc_xenith_literal(&mut self, ra: u16, apophis: u16) -> u16 {
-        let mut block = vec![0u8; Level::Xenith.bytes() as usize];
+    fn alloc_zenith_literal(&mut self, ra: u16, apophis: u16) -> u16 {
+        let mut block = vec![0u8; Level::Zenith.bytes() as usize];
         let ra64 = (ra as u64).to_le_bytes();
         let ap64 = (apophis as u64).to_le_bytes();
         block[0..8].copy_from_slice(&ra64);
@@ -230,10 +214,10 @@ impl Emitter {
 
     fn alloc_noun_object(&mut self, obj_type: u32, payload: &[u8], entrypoint: u32) -> u16 {
         let hash = blake3::hash(payload);
-        if let Some(addr) = self.dictionnaire_cas.get(&hash) {
+        if let Some(addr) = self.dictionary_cas.get(&hash) {
             return *addr;
         }
-        while self.cursor_noun % 4 != 0 {
+        while !self.cursor_noun.is_multiple_of(4) {
             self.segment_noun.push(0);
             self.cursor_noun += 1;
         }
@@ -248,36 +232,36 @@ impl Emitter {
         debug_assert_eq!(header.len(), NOUN_HEADER_SIZE as usize);
         self.segment_noun.extend_from_slice(&header);
         self.segment_noun.extend_from_slice(payload);
-        self.dictionnaire_cas.insert(hash, payload_addr);
+        self.dictionary_cas.insert(hash, payload_addr);
         self.cursor_noun = payload_addr + payload.len() as u16;
         payload_addr
     }
-    pub fn kherankh(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
+    pub fn kherankh(&mut self, actual_code: &mut Vec<u8>, target: &Expression) {
         // OpCode pour JLE (Jump if Less or Equal)
         self.emit_rel16_prefix(actual_code);
         actual_code.push(0x0F);
         actual_code.push(0x8E);
 
         // On enregistre l'emplacement pour le patcher plus tard
-        self.record_jump(actual_code, cible);
+        self.record_jump(actual_code, target);
     }
-    pub fn herankh(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
+    pub fn herankh(&mut self, actual_code: &mut Vec<u8>, target: &Expression) {
         // OpCode pour JGE (Jump if Greater or Equal)
         self.emit_rel16_prefix(actual_code);
         actual_code.push(0x0F);
         actual_code.push(0x8D);
 
         // On enregistre l'emplacement pour le patcher plus tard
-        self.record_jump(actual_code, cible);
+        self.record_jump(actual_code, target);
     }
-    pub fn ankh(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
+    pub fn ankh(&mut self, actual_code: &mut Vec<u8>, target: &Expression) {
         // OpCode pour JE near (Sauter si Égal, relatif 16-bit)
         self.emit_rel16_prefix(actual_code);
         actual_code.push(0x0F);
         actual_code.push(0x84);
 
         // On enregistre l'endroit à patcher (comme pour neheh)
-        self.record_jump(actual_code, cible);
+        self.record_jump(actual_code, target);
     }
     pub fn per(&mut self, actual_code: &mut Vec<u8>, message: &Expression) {
         match message {
@@ -287,7 +271,7 @@ impl Emitter {
                 payload.push(0);
                 let addr = self.alloc_noun_object(NOUN_TYPE_DATA, &payload, 0);
 
-                if self.pmode_enabled {
+                if self.protected_mode_enabled {
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                 } else {
                     actual_code.push(0xBE);
@@ -296,15 +280,15 @@ impl Emitter {
 
                 self.emit_rel16_prefix(actual_code);
                 actual_code.push(0xE8);
-                let cible = Expression::Identifier("std_print".to_string());
-                self.record_jump(actual_code, &cible);
+                let target = Expression::Identifier("std_print".to_string());
+                self.record_jump(actual_code, &target);
             }
             Expression::Register(r) => {
                 let spec = parse_general_register(r);
 
                 // On vérifie si c'est bien %ka (Base)
                 if spec.kind == RegKind::General(RegBase::Ka) && spec.level == Level::Base {
-                    if self.pmode_enabled {
+                    if self.protected_mode_enabled {
                         // Mode Protégé : On écrit directement dans la mémoire VGA
                         actual_code.extend_from_slice(&[
                             0x57, // PUSH EDI (Sauvegarde)
@@ -331,7 +315,7 @@ impl Emitter {
             _ => panic!("Type de message inconnu pour le verbe 'per'."),
         }
     }
-    pub fn mer(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn mer(&mut self, actual_code: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -386,8 +370,8 @@ impl Emitter {
                     self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__helix_or128".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__helix_or128".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 Expression::Helix { ra, apophis } => {
                     let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
@@ -395,8 +379,8 @@ impl Emitter {
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__helix_or128".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__helix_or128".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 _ => panic!("Mer only supports Helix literals or registers for 128-bit."),
             }
@@ -407,7 +391,7 @@ impl Emitter {
             );
         }
     }
-    pub fn henet(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn henet(&mut self, actual_code: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -462,8 +446,8 @@ impl Emitter {
                     self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__helix_and128".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__helix_and128".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 Expression::Helix { ra, apophis } => {
                     let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
@@ -471,8 +455,8 @@ impl Emitter {
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__helix_and128".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__helix_and128".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 _ => panic!("Henet only supports Helix literals or registers for 128-bit."),
             }
@@ -483,7 +467,7 @@ impl Emitter {
             );
         }
     }
-    pub fn kheb(&mut self, actual_code: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn kheb(&mut self, actual_code: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -542,8 +526,8 @@ impl Emitter {
                     self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__helix_sub128".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__helix_sub128".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 Expression::Helix { ra, apophis } => {
                     let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
@@ -551,12 +535,12 @@ impl Emitter {
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__helix_sub128".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__helix_sub128".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 _ => panic!("Kheb only supports Helix literals or registers for 128-bit."),
             }
-        } else if dest_spec.level == Level::Xenith {
+        } else if dest_spec.level == Level::Zenith {
             match value {
                 Expression::Register(src) => {
                     let src_spec = parse_general_register(src);
@@ -569,17 +553,17 @@ impl Emitter {
                     self.emit_mov_reg_reg(actual_code, RegBase::Si, src_base);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__xenith_sub256".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__zenith_sub256".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 Expression::Helix { ra, apophis } => {
-                    let addr = self.alloc_xenith_literal(*ra, *apophis);
+                    let addr = self.alloc_zenith_literal(*ra, *apophis);
                     self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(actual_code);
                     actual_code.push(0xE8);
-                    let cible = Expression::Identifier("__xenith_sub256".to_string());
-                    self.record_jump(actual_code, &cible);
+                    let target = Expression::Identifier("__zenith_sub256".to_string());
+                    self.record_jump(actual_code, &target);
                 }
                 _ => panic!("Kheb only supports Helix literals or registers for 256-bit."),
             }
@@ -590,7 +574,7 @@ impl Emitter {
             );
         }
     }
-    pub fn duat(&mut self, actual_code: &mut Vec<u8>, phrase: &String, address: &u16) {
+    pub fn duat(&mut self, actual_code: &mut Vec<u8>, phrase: &str, address: &u16) {
         for (i, c) in phrase.chars().enumerate() {
             // Opcode 0xC6 0x06 = MOV [imm16], imm8
             actual_code.push(0xC6);
@@ -606,7 +590,7 @@ impl Emitter {
         actual_code.extend_from_slice(&addr_zero.to_le_bytes());
         actual_code.push(0x00);
     }
-    pub fn setjem(&mut self, actual_code: &mut Vec<u8>, destination: &String) {
+    pub fn setjem(&mut self, actual_code: &mut Vec<u8>, destination: &str) {
         let dest_spec = parse_general_register(destination);
         ensure_supported_level("sedjem", destination, dest_spec.level);
         if let RegKind::General(RegBase::Ka) = dest_spec.kind {
@@ -628,14 +612,14 @@ impl Emitter {
         self.in_kernel = in_kernel;
         self
     }
-    pub fn neheh(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
+    pub fn neheh(&mut self, actual_code: &mut Vec<u8>, target: &Expression) {
         self.emit_rel16_prefix(actual_code);
         actual_code.push(0xE9);
-        self.record_jump(actual_code, cible);
+        self.record_jump(actual_code, target);
     }
-    pub fn jena(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
+    pub fn jena(&mut self, actual_code: &mut Vec<u8>, target: &Expression) {
         actual_code.push(0xE8);
-        self.record_jump(actual_code, cible);
+        self.record_jump(actual_code, target);
     }
     pub fn io_in(&mut self, actual_code: &mut Vec<u8>, port: &Expression) {
         // Lecture matérielle (toujours vers AL - 8 bits)
@@ -665,20 +649,20 @@ impl Emitter {
         actual_code.extend_from_slice(&[0xB8, 0x03, 0x00, 0xCD, 0x10]);
     }
 
-    pub fn isfet(&mut self, code_actual: &mut Vec<u8>, cible: &Expression) {
+    pub fn isfet(&mut self, code_actual: &mut Vec<u8>, target: &Expression) {
         // OpCode pour JNE near (Sauter si Différent, relatif 16-bit)
         self.emit_rel16_prefix(code_actual);
         code_actual.push(0x0F);
         code_actual.push(0x85);
 
         // On enregistre l'endroit à patcher EXACTEMENT comme pour ankh
-        self.record_jump(code_actual, cible);
+        self.record_jump(code_actual, target);
 
         // Placeholders (les zéros temporels)&
         code_actual.push(0x00);
         code_actual.push(0x00);
     }
-    pub fn kheper(&mut self, code_actual: &mut Vec<u8>, source: &String, adresse: &Expression) {
+    pub fn kheper(&mut self, code_actual: &mut Vec<u8>, source: &str, adresse: &Expression) {
         // 1. On identifie le code du registre source
         let source_spec = parse_general_register(source);
         let source_base = match source_spec.kind {
@@ -700,7 +684,7 @@ impl Emitter {
                     let addr = self
                         .variables
                         .get(nom)
-                        .expect(&format!("Variable '{nom}' not found"));
+                        .unwrap_or_else(|| panic!("Variable '{nom}' not found"));
                     self.emit_mov_reg_imm32(code_actual, RegBase::Di, *addr as u32);
                 }
                 Expression::Register(r) => {
@@ -720,7 +704,7 @@ impl Emitter {
 
         ensure_supported_level("kheper", source, source_spec.level);
         let reg_code: u8 = reg_code(source_base);
-        if self.pmode_enabled {
+        if self.protected_mode_enabled {
             match adresse {
                 Expression::Helix { ra, .. } => {
                     code_actual.push(0x89);
@@ -736,7 +720,7 @@ impl Emitter {
                     let addr = self
                         .variables
                         .get(nom)
-                        .expect(&format!("Variable '{nom}' not found"));
+                        .unwrap_or_else(|| panic!("Variable '{nom}' not found"));
                     code_actual.push(0x89);
                     code_actual.push(0x05 | (reg_code << 3));
                     code_actual.extend_from_slice(&(*addr as u32).to_le_bytes());
@@ -751,14 +735,14 @@ impl Emitter {
                 Expression::Helix { ra, .. } => {
                     code_actual.push(0x89); // ou 0x8B
                     code_actual.push(0x06 | (reg_code << 3));
-                    code_actual.extend_from_slice(&(*ra as u16).to_le_bytes()); // Seulement 16 bits
+                    code_actual.extend_from_slice(&(*ra).to_le_bytes()); // Seulement 16 bits
                 }
                 Expression::Identifier(nom) => {
                     // On récupère l'adresse de la variable résolue par Thot
                     let addr = self
                         .variables
                         .get(nom)
-                        .expect(&format!("Variable '{nom}' not found"));
+                        .unwrap_or_else(|| panic!("Variable '{nom}' not found"));
                     code_actual.push(0x89);
                     code_actual.push(0x06 | (reg_code << 3));
                     code_actual.extend_from_slice(addr.to_le_bytes().as_slice());
@@ -767,8 +751,8 @@ impl Emitter {
             }
         }
     }
-    pub fn push(&mut self, actual_code: &mut Vec<u8>, cible: &Expression) {
-        match cible {
+    pub fn push(&mut self, actual_code: &mut Vec<u8>, target: &Expression) {
+        match target {
             Expression::Register(r) => {
                 let reg_spec = parse_general_register(r);
                 let reg_base = match reg_spec.kind {
@@ -777,7 +761,7 @@ impl Emitter {
                 };
                 if reg_spec.level == Level::Extreme {
                     // SUB ESP, 16
-                    if self.pmode_enabled {
+                    if self.protected_mode_enabled {
                         actual_code.extend_from_slice(&[0x83, 0xEC, 0x10]);
                     } else {
                         actual_code.extend_from_slice(&[0x66, 0x83, 0xEC, 0x10]);
@@ -785,13 +769,13 @@ impl Emitter {
                     // ESI = source pointer
                     self.emit_mov_reg_reg(actual_code, RegBase::Si, reg_base);
                     // EDI = ESP
-                    if self.pmode_enabled {
+                    if self.protected_mode_enabled {
                         actual_code.extend_from_slice(&[0x8B, 0xFC]);
                     } else {
                         actual_code.extend_from_slice(&[0x66, 0x8B, 0xFC]);
                     }
                     self.emit_rep_movsd_4(actual_code);
-                } else if reg_spec.level == Level::Xenith {
+                } else if reg_spec.level == Level::Zenith {
                     panic!(
                         "Push does not yet support registers beyond Extreme: %{} ({})",
                         r, reg_spec.level
@@ -811,45 +795,28 @@ impl Emitter {
             _ => panic!("Push only supports registers and numbers."),
         }
     }
-    pub fn dja(&mut self, actual_code: &mut Vec<u8>, segment: u16, cible: &Expression) {
+    pub fn dja(&mut self, actual_code: &mut Vec<u8>, segment: u16, target: &Expression) {
         // Dans la boucle generer_instructions :
         // 1. L'Opcode du Far Call (0x9A)s
         actual_code.push(0x9A);
 
         // 2. L'Offset (4 octets pour le mode protégé 32 bits)
         // On utilise record_jump car l'adresse du label doit être patchée à la fin
-        self.record_jump_far(actual_code, cible.clone()); // Voir fonction ci-dessous
+        self.record_jump_far(actual_code, target.clone()); // Voir fonction ci-dessous
 
         // 3. Le Sélecteur de Segment (2 octets)
         actual_code.extend_from_slice(&segment.to_le_bytes());
     }
-    pub fn emit_sekhmet_handler(&mut self, buffer: &mut Vec<u8>) {
-        // 1. Sauvegarde immédiate de l'état du chaos (Isfet)
-        buffer.push(0x60); // PUSHAD : Sauvegarde tous les registres 32 bits
-
-        // 2. Identification du Plan fautif
-        // On récupère l'adresse du PCB (Plan Control Block) actuel
-        // KERNEL_CUR_PLAN_ADDR est déjà défini à 0x9004 dans ton code
-        buffer.extend_from_slice(&[0xA1, 0x04, 0x90, 0x00, 0x00]); // MOV EAX, [0x9004]
-
-        // 3. Appel à la logique de Renaissance (Le Phénix)
-        // On passe l'adresse du Plan dans EAX pour que le noyau sache qui faire renaître
-        self.record_jump(buffer, &Expression::Identifier("reborn".to_string()));
-
-        buffer.push(0x61); // POPAD (au cas où on reviendrait, mais le Phénix réinitialise tout)
-        buffer.push(0xCF); // IRETD : Retour d'interruption protégé
-    }
-    // Ajoute cette fonction d'aide dans impl Emitter :
-    fn record_jump_far(&mut self, code: &mut Vec<u8>, cible: Expression) {
+    fn record_jump_far(&mut self, code: &mut Vec<u8>, target: Expression) {
         self.jump.push(JumpPatch {
             offset: code.len(),
-            cible,
+            target,
             kernel: self.in_kernel,
             size: 4, // Toujours 4 octets pour l'offset du Far Call en 32 bits
         });
         code.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
     }
-    pub fn sena(&mut self, code_actual: &mut Vec<u8>, destination: &String, adresse: &Expression) {
+    pub fn sena(&mut self, code_actual: &mut Vec<u8>, destination: &str, adresse: &Expression) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -869,7 +836,7 @@ impl Emitter {
                     let addr = self
                         .variables
                         .get(nom)
-                        .expect(&format!("Variable '{}' introuvable", nom));
+                        .unwrap_or_else(|| panic!("Variable '{}' introuvable", nom));
                     self.emit_mov_reg_imm32(code_actual, RegBase::Si, *addr as u32);
                 }
                 Expression::Register(r) => {
@@ -888,9 +855,9 @@ impl Emitter {
         }
 
         ensure_supported_level("sena", destination, dest_spec.level);
-        // 1. On identifie le code du registre cible
+        // 1. On identifie le code du registre target
         let reg_code: u8 = reg_code(dest_base);
-        if self.pmode_enabled {
+        if self.protected_mode_enabled {
             match adresse {
                 Expression::Helix { ra, .. } => {
                     code_actual.push(0x8B);
@@ -907,7 +874,7 @@ impl Emitter {
                     let addr = self
                         .variables
                         .get(nom)
-                        .expect(&format!("Variable '{}' introuvable", nom));
+                        .unwrap_or_else(|| panic!("Variable '{}' introuvable", nom));
                     code_actual.push(0x8B);
                     code_actual.push(0x05 | (reg_code << 3));
                     code_actual.extend_from_slice(&(*addr as u32).to_le_bytes());
@@ -933,17 +900,17 @@ impl Emitter {
                 Expression::Helix { ra, .. } => {
                     code_actual.push(0x89); // ou 0x8B
                     code_actual.push(0x06 | (reg_code << 3));
-                    code_actual.extend_from_slice(&(*ra as u16).to_le_bytes()); // Seulement 16 bits
+                    code_actual.extend_from_slice(&(*ra).to_le_bytes()); // Seulement 16 bits
                 }
                 Expression::Identifier(nom) => {
                     // On récupère l'adresse de la variable (SLS ou NAMA)
                     let addr = self
                         .variables
                         .get(nom)
-                        .expect(&format!("Variable '{nom}' not found"));
+                        .unwrap_or_else(|| panic!("Variable '{nom}' not found"));
                     code_actual.push(0x8B);
                     code_actual.push(0x06 | (reg_code << 3));
-                    code_actual.extend_from_slice(&(*addr as u16).to_le_bytes());
+                    code_actual.extend_from_slice(&(*addr).to_le_bytes());
                 }
                 Expression::Register(r) => {
                     let ptr_spec = parse_general_register(r);
@@ -970,7 +937,7 @@ impl Emitter {
         ];
         code_actual.extend_from_slice(&setup_disque);
     }
-    pub fn pop(&mut self, actual_code: &mut Vec<u8>, destination: &String) {
+    pub fn pop(&mut self, actual_code: &mut Vec<u8>, destination: &str) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -978,7 +945,7 @@ impl Emitter {
         };
         if dest_spec.level == Level::Extreme {
             // ESI = ESP
-            if self.pmode_enabled {
+            if self.protected_mode_enabled {
                 actual_code.extend_from_slice(&[0x8B, 0xF4]);
             } else {
                 actual_code.extend_from_slice(&[0x66, 0x8B, 0xF4]);
@@ -987,12 +954,12 @@ impl Emitter {
             self.emit_mov_reg_reg(actual_code, RegBase::Di, dest_base);
             self.emit_rep_movsd_4(actual_code);
             // ADD ESP, 16
-            if self.pmode_enabled {
+            if self.protected_mode_enabled {
                 actual_code.extend_from_slice(&[0x83, 0xC4, 0x10]);
             } else {
                 actual_code.extend_from_slice(&[0x66, 0x83, 0xC4, 0x10]);
             }
-        } else if dest_spec.level == Level::Xenith {
+        } else if dest_spec.level == Level::Zenith {
             panic!(
                 "Pop does not yet support registers beyond Extreme: %{} ({})",
                 destination, dest_spec.level
@@ -1028,19 +995,19 @@ impl Emitter {
             _ => panic!("The OUT port must be a number or register %da"),
         }
     }
-    pub fn her(&mut self, code_actual: &mut Vec<u8>, cible: &Expression) {
+    pub fn her(&mut self, code_actual: &mut Vec<u8>, target: &Expression) {
         self.emit_rel16_prefix(code_actual);
         code_actual.push(0x0F);
         code_actual.push(0x8F); // OpCode pour JG (Saut si plus grand)
-        self.record_jump(code_actual, cible);
+        self.record_jump(code_actual, target);
     }
-    pub fn kher(&mut self, code_actual: &mut Vec<u8>, cible: &Expression) {
+    pub fn kher(&mut self, code_actual: &mut Vec<u8>, target: &Expression) {
         self.emit_rel16_prefix(code_actual);
         code_actual.push(0x0F);
         code_actual.push(0x8C); // OpCode pour JL (Saut si plus petit)
-        self.record_jump(code_actual, cible);
+        self.record_jump(code_actual, target);
     }
-    pub fn nama(&mut self, name: &String, value: &Expression) {
+    pub fn nama(&mut self, name: &str, value: &Expression) {
         let contenu_brut = match value {
             Expression::Helix { ra, apophis } => {
                 let n = ((*ra as i32) << 16) | (*apophis as i32);
@@ -1056,7 +1023,7 @@ impl Emitter {
         let adresse = self.alloc_noun_object(NOUN_TYPE_DATA, &contenu_brut, 0);
         self.variables.insert(name.to_string(), adresse);
     }
-    pub fn henek(&mut self, code: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn henek(&mut self, code: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_register(destination);
         match dest_spec.kind {
             RegKind::Segment(seg) => {
@@ -1092,7 +1059,6 @@ impl Emitter {
                             );
                             // 1. Fusion des deux forces en un seul bloc de 32 bits
                             let n = ((*ra as i32) << 16) | (*apophis as i32);
-                            // 2. Le reste ne change pas !
                             code.push(0xB8 + reg_code(dest_base));
                             code.extend_from_slice(&n.to_le_bytes());
                         }
@@ -1140,7 +1106,7 @@ impl Emitter {
                             "Henek only supports Helix literals or registers for 128-bit registers."
                         ),
                     }
-                } else if dest_spec.level == Level::Xenith {
+                } else if dest_spec.level == Level::Zenith {
                     match value {
                         Expression::Register(src_name) => {
                             let src_spec = parse_general_register(src_name);
@@ -1158,7 +1124,7 @@ impl Emitter {
                             self.emit_mov_reg_reg(code, dest_base, src_base);
                         }
                         Expression::Helix { ra, apophis } => {
-                            let addr = self.alloc_xenith_literal(*ra, *apophis);
+                            let addr = self.alloc_zenith_literal(*ra, *apophis);
                             self.emit_mov_reg_imm32(code, dest_base, addr as u32);
                         }
                         _ => panic!(
@@ -1175,7 +1141,7 @@ impl Emitter {
         }
     }
 
-    pub fn sema(&mut self, code_actual: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn sema(&mut self, code_actual: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -1236,8 +1202,8 @@ impl Emitter {
                     self.emit_mov_reg_reg(code_actual, RegBase::Si, src_base);
                     self.emit_rel16_prefix(code_actual);
                     code_actual.push(0xE8);
-                    let cible = Expression::Identifier("__helix_add128".to_string());
-                    self.record_jump(code_actual, &cible);
+                    let target = Expression::Identifier("__helix_add128".to_string());
+                    self.record_jump(code_actual, &target);
                 }
                 Expression::Helix { ra, apophis } => {
                     let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
@@ -1245,12 +1211,12 @@ impl Emitter {
                     self.emit_mov_reg_imm32(code_actual, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(code_actual);
                     code_actual.push(0xE8);
-                    let cible = Expression::Identifier("__helix_add128".to_string());
-                    self.record_jump(code_actual, &cible);
+                    let target = Expression::Identifier("__helix_add128".to_string());
+                    self.record_jump(code_actual, &target);
                 }
                 _ => panic!("Sema only supports Helix literals or registers for 128-bit."),
             }
-        } else if dest_spec.level == Level::Xenith {
+        } else if dest_spec.level == Level::Zenith {
             match value {
                 Expression::Register(src) => {
                     let src_spec = parse_general_register(src);
@@ -1263,17 +1229,17 @@ impl Emitter {
                     self.emit_mov_reg_reg(code_actual, RegBase::Si, src_base);
                     self.emit_rel16_prefix(code_actual);
                     code_actual.push(0xE8);
-                    let cible = Expression::Identifier("__xenith_add256".to_string());
-                    self.record_jump(code_actual, &cible);
+                    let target = Expression::Identifier("__zenith_add256".to_string());
+                    self.record_jump(code_actual, &target);
                 }
                 Expression::Helix { ra, apophis } => {
-                    let addr = self.alloc_xenith_literal(*ra, *apophis);
+                    let addr = self.alloc_zenith_literal(*ra, *apophis);
                     self.emit_mov_reg_reg(code_actual, RegBase::Di, dest_base);
                     self.emit_mov_reg_imm32(code_actual, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(code_actual);
                     code_actual.push(0xE8);
-                    let cible = Expression::Identifier("__xenith_add256".to_string());
-                    self.record_jump(code_actual, &cible);
+                    let target = Expression::Identifier("__zenith_add256".to_string());
+                    self.record_jump(code_actual, &target);
                 }
                 _ => panic!("Sema only supports Helix literals or registers for 256-bit."),
             }
@@ -1285,7 +1251,7 @@ impl Emitter {
         }
     }
 
-    pub fn shesa(&mut self, code_actual: &mut Vec<u8>, destination: &String, value: &Expression) {
+    pub fn shesa(&mut self, code_actual: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_general_register(destination);
         let dest_base = match dest_spec.kind {
             RegKind::General(base) => base,
@@ -1344,8 +1310,8 @@ impl Emitter {
                     self.emit_mov_reg_reg(code_actual, RegBase::Si, src_base);
                     self.emit_rel16_prefix(code_actual);
                     code_actual.push(0xE8);
-                    let cible = Expression::Identifier("__helix_mul128".to_string());
-                    self.record_jump(code_actual, &cible);
+                    let target = Expression::Identifier("__helix_mul128".to_string());
+                    self.record_jump(code_actual, &target);
                 }
                 Expression::Helix { ra, apophis } => {
                     let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
@@ -1353,8 +1319,8 @@ impl Emitter {
                     self.emit_mov_reg_imm32(code_actual, RegBase::Si, addr as u32);
                     self.emit_rel16_prefix(code_actual);
                     code_actual.push(0xE8);
-                    let cible = Expression::Identifier("__helix_mul128".to_string());
-                    self.record_jump(code_actual, &cible);
+                    let target = Expression::Identifier("__helix_mul128".to_string());
+                    self.record_jump(code_actual, &target);
                 }
                 _ => panic!("Shesa only supports Helix literals or registers for 128-bit."),
             }
@@ -1380,55 +1346,55 @@ impl Emitter {
         let base_stage2 = STAGE_TWO;
         let instructions = self.instructions.clone();
         for instruction in instructions {
-            if let Instruction::Label(ref nom) = instruction {
-                if nom == "kernel" || nom == "noyau" {
-                    self.set_in_kernel(true);
-                    dans_noyau = true;
-                }
+            if let Instruction::Label(ref nom) = instruction
+                && (nom == "kernel" || nom == "noyau")
+            {
+                self.set_in_kernel(true);
+                dans_noyau = true;
             }
-            let mut actual_code = if dans_noyau {
+            let actual_code = if dans_noyau {
                 &mut stage2_code
             } else {
                 &mut stage1_code
             };
             let base_actuelle = if dans_noyau { base_stage2 } else { base_stage1 };
             match instruction {
-                Instruction::Neheh { cible } => {
-                    self.neheh(&mut actual_code, &cible);
+                Instruction::Neheh { target } => {
+                    self.neheh(actual_code, &target);
                 }
-                Instruction::Jena { cible } => {
-                    self.jena(&mut actual_code, &cible);
+                Instruction::Jena { target } => {
+                    self.jena(actual_code, &target);
                 }
                 Instruction::Henek { destination, value } => {
-                    self.henek(&mut actual_code, &destination, &value);
+                    self.henek(actual_code, &destination, &value);
                 }
                 // 2. Unifie le NAMA avec BLAKE3 (SLS Pur)
                 Instruction::Nama { name, value } => {
                     self.nama(&name, &value);
                 }
-                Instruction::Push { cible } => {
-                    self.push(&mut actual_code, &cible);
+                Instruction::Push { target } => {
+                    self.push(actual_code, &target);
                 }
                 Instruction::Pop { destination } => {
-                    self.pop(&mut actual_code, &destination);
+                    self.pop(actual_code, &destination);
                 }
                 Instruction::In { port } => {
-                    self.io_in(&mut actual_code, &port);
+                    self.io_in(actual_code, &port);
                 }
                 Instruction::Out { port } => {
-                    self.io_out(&mut actual_code, &port);
+                    self.io_out(actual_code, &port);
                 }
-                Instruction::Her { cible } => {
-                    self.her(&mut actual_code, &cible);
+                Instruction::Her { target } => {
+                    self.her(actual_code, &target);
                 }
-                Instruction::Kher { cible } => {
-                    self.kher(&mut actual_code, &cible);
+                Instruction::Kher { target } => {
+                    self.kher(actual_code, &target);
                 }
-                Instruction::Isfet { cible } => {
-                    self.isfet(&mut actual_code, &cible);
+                Instruction::Isfet { target } => {
+                    self.isfet(actual_code, &target);
                 }
                 Instruction::Kheper { source, adresse } => {
-                    self.kheper(&mut actual_code, &source, &adresse);
+                    self.kheper(actual_code, &source, &adresse);
                 }
                 Instruction::Rdtsc => {
                     actual_code.push(0x0F);
@@ -1436,30 +1402,30 @@ impl Emitter {
                 }
                 // Traduction de : sema %registre, valeur (ADD)
                 Instruction::Sema { destination, value } => {
-                    self.sema(&mut actual_code, &destination, &value);
+                    self.sema(actual_code, &destination, &value);
                 }
                 // Traduction de : shesa %registre, valeur (MUL)
                 Instruction::Shesa { destination, value } => {
-                    self.shesa(&mut actual_code, &destination, &value);
+                    self.shesa(actual_code, &destination, &value);
                 }
                 Instruction::Kherp => {
-                    self.kherp(&mut actual_code);
+                    self.kherp(actual_code);
                 }
                 // Traduction de : sena %registre, adresse (MOV reg, [mem])
                 Instruction::Sena {
                     destination,
                     adresse,
                 } => {
-                    self.sena(&mut actual_code, &destination, &adresse);
+                    self.sena(actual_code, &destination, &adresse);
                 }
                 Instruction::Sedjem { destination } => {
-                    self.setjem(&mut actual_code, &destination);
+                    self.setjem(actual_code, &destination);
                 }
                 Instruction::Henet { destination, value } => {
-                    self.henet(&mut actual_code, &destination, &value);
+                    self.henet(actual_code, &destination, &value);
                 }
                 Instruction::Mer { destination, value } => {
-                    self.mer(&mut actual_code, &destination, &value);
+                    self.mer(actual_code, &destination, &value);
                 }
                 Instruction::Return { resultat } => {
                     match resultat {
@@ -1490,10 +1456,10 @@ impl Emitter {
                     actual_code.push(0xC3);
                 }
                 Instruction::Wab => {
-                    self.wab(&mut actual_code);
+                    self.wab(actual_code);
                 }
                 Instruction::Per { message } => {
-                    self.per(&mut actual_code, &message);
+                    self.per(actual_code, &message);
                 }
                 Instruction::Label(nom) => {
                     // On utilise base_actuelle (0x7C00 ou 0x7E00) au lieu de base_addr !
@@ -1508,7 +1474,7 @@ impl Emitter {
                         pmode_lgdt_patch = Some(base_off + lgdt_off);
                         pmode_lidt_patch = Some(base_off + lidt_off);
                         pmode_inserted = true;
-                        self.pmode_enabled = true;
+                        self.protected_mode_enabled = true;
                     }
                 }
                 Instruction::Wdj { left, right } => {
@@ -1584,27 +1550,27 @@ impl Emitter {
                                     &right_reg,
                                     right_spec.level,
                                 );
-                                self.emit_mov_reg_reg(&mut actual_code, RegBase::Di, left_base);
-                                self.emit_mov_reg_reg(&mut actual_code, RegBase::Si, right_base);
+                                self.emit_mov_reg_reg(actual_code, RegBase::Di, left_base);
+                                self.emit_mov_reg_reg(actual_code, RegBase::Si, right_base);
                                 self.emit_rel16_prefix(actual_code);
                                 actual_code.push(0xE8);
-                                let cible = Expression::Identifier("__helix_cmp128".to_string());
-                                self.record_jump(actual_code, &cible);
+                                let target = Expression::Identifier("__helix_cmp128".to_string());
+                                self.record_jump(actual_code, &target);
                             }
                             Expression::Helix { ra, apophis } => {
                                 let addr = self.alloc_helix_literal(left_spec.level, ra, apophis);
-                                self.emit_mov_reg_reg(&mut actual_code, RegBase::Di, left_base);
-                                self.emit_mov_reg_imm32(&mut actual_code, RegBase::Si, addr as u32);
+                                self.emit_mov_reg_reg(actual_code, RegBase::Di, left_base);
+                                self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                                 self.emit_rel16_prefix(actual_code);
                                 actual_code.push(0xE8);
-                                let cible = Expression::Identifier("__helix_cmp128".to_string());
-                                self.record_jump(actual_code, &cible);
+                                let target = Expression::Identifier("__helix_cmp128".to_string());
+                                self.record_jump(actual_code, &target);
                             }
                             _ => {
                                 panic!("Wdj only supports Helix literals or registers for 128-bit.")
                             }
                         }
-                    } else if left_spec.level == Level::Xenith {
+                    } else if left_spec.level == Level::Zenith {
                         match right {
                             Expression::Register(right_reg) => {
                                 let right_spec = parse_general_register(&right_reg);
@@ -1619,21 +1585,21 @@ impl Emitter {
                                     &right_reg,
                                     right_spec.level,
                                 );
-                                self.emit_mov_reg_reg(&mut actual_code, RegBase::Di, left_base);
-                                self.emit_mov_reg_reg(&mut actual_code, RegBase::Si, right_base);
+                                self.emit_mov_reg_reg(actual_code, RegBase::Di, left_base);
+                                self.emit_mov_reg_reg(actual_code, RegBase::Si, right_base);
                                 self.emit_rel16_prefix(actual_code);
                                 actual_code.push(0xE8);
-                                let cible = Expression::Identifier("__xenith_cmp256".to_string());
-                                self.record_jump(actual_code, &cible);
+                                let target = Expression::Identifier("__zenith_cmp256".to_string());
+                                self.record_jump(actual_code, &target);
                             }
                             Expression::Helix { ra, apophis } => {
-                                let addr = self.alloc_xenith_literal(ra, apophis);
-                                self.emit_mov_reg_reg(&mut actual_code, RegBase::Di, left_base);
-                                self.emit_mov_reg_imm32(&mut actual_code, RegBase::Si, addr as u32);
+                                let addr = self.alloc_zenith_literal(ra, apophis);
+                                self.emit_mov_reg_reg(actual_code, RegBase::Di, left_base);
+                                self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
                                 self.emit_rel16_prefix(actual_code);
                                 actual_code.push(0xE8);
-                                let cible = Expression::Identifier("__xenith_cmp256".to_string());
-                                self.record_jump(actual_code, &cible);
+                                let target = Expression::Identifier("__zenith_cmp256".to_string());
+                                self.record_jump(actual_code, &target);
                             }
                             _ => {
                                 panic!("Wdj only supports Helix literals or registers for 256-bit.")
@@ -1646,32 +1612,31 @@ impl Emitter {
                         );
                     }
                 }
-                // Traduction de : ankh cible (Saut Conditionnel : JE)
-                Instruction::Ankh { cible } => {
-                    self.ankh(&mut actual_code, &cible);
+                // Traduction de : ankh target (Saut Conditionnel : JE)
+                Instruction::Ankh { target } => {
+                    self.ankh(actual_code, &target);
                 }
                 Instruction::Duat { phrase, address } => {
-                    self.duat(&mut actual_code, &phrase, &address);
+                    self.duat(actual_code, &phrase, &address);
                 }
                 // Traduction de : kheb %registre, valeur (SUB)
                 Instruction::Kheb { destination, value } => {
-                    self.kheb(&mut actual_code, &destination, &value);
+                    self.kheb(actual_code, &destination, &value);
                 }
-                Instruction::HerAnkh { cible } => {
-                    self.herankh(&mut actual_code, &cible);
+                Instruction::HerAnkh { target } => {
+                    self.herankh(actual_code, &target);
                 }
-                Instruction::KherAnkh { cible } => {
-                    self.kherankh(&mut actual_code, &cible);
+                Instruction::KherAnkh { target } => {
+                    self.kherankh(actual_code, &target);
                 }
-                Instruction::Dema { chemin } => {
+                Instruction::Dema { path } => {
                     panic!(
-                        "Erreur fatale de Maât : L'Émetteur a trouvé une instruction 'dema' pointant vers '{}'. Le Tisserand a oublié de fusionner cette tablette avant la génération du binaire !",
-                        chemin
+                        "Fatal error by Maat: The Transmitter found a 'dema' instruction pointing to '{path}'. The Tisserand forgot to merge this tablet before generating the binary!",
                     );
                 }
                 Instruction::Smen { .. } => {}
                 Instruction::CurrentAddress => {}
-                Instruction::Dja { segment, cible } => self.dja(&mut actual_code, segment, &cible),
+                Instruction::Dja { segment, target } => self.dja(actual_code, segment, &target),
             }
         } // Injection de la routine print dans le Stage 2 (pour ne pas saturer le Stage 1)
         // --- Injection UNIQUE de la routine print améliorée ---
@@ -1711,10 +1676,10 @@ impl Emitter {
         stage2_code.extend_from_slice(&helix_add);
 
         self.labels.insert(
-            "__xenith_add256".to_string(),
+            "__zenith_add256".to_string(),
             base_stage2 + (stage2_code.len() as isize),
         );
-        let xenith_add = vec![
+        let zenith_add = vec![
             0x60, // PUSHAD
             0x8B, 0x07, 0x03, 0x06, 0x89, 0x07, // dword0
             0x8B, 0x47, 0x04, 0x13, 0x46, 0x04, 0x89, 0x47, 0x04, 0x8B, 0x47, 0x08, 0x13, 0x46,
@@ -1726,13 +1691,13 @@ impl Emitter {
             0x47, 0x0C, 0x89, 0x47, 0x10, 0x89, 0x47, 0x14, 0x89, 0x47, 0x18, 0x89, 0x47, 0x1C,
             0x61, 0xC3,
         ];
-        stage2_code.extend_from_slice(&xenith_add);
+        stage2_code.extend_from_slice(&zenith_add);
 
         self.labels.insert(
-            "__xenith_sub256".to_string(),
+            "__zenith_sub256".to_string(),
             base_stage2 + (stage2_code.len() as isize),
         );
-        let xenith_sub = vec![
+        let zenith_sub = vec![
             0x60, 0xF8, // PUSHAD, CLC
             0x8B, 0x07, 0x2B, 0x06, 0x89, 0x07, 0x8B, 0x47, 0x04, 0x1B, 0x46, 0x04, 0x89, 0x47,
             0x04, 0x8B, 0x47, 0x08, 0x1B, 0x46, 0x08, 0x89, 0x47, 0x08, 0x8B, 0x47, 0x0C, 0x1B,
@@ -1746,13 +1711,13 @@ impl Emitter {
             0x31, 0xC0, 0x89, 0x47, 0x10, 0x89, 0x47, 0x14, 0x89, 0x47, 0x18, 0x89, 0x47, 0x1C,
             0x61, 0xC3, // POPAD, RET
         ];
-        stage2_code.extend_from_slice(&xenith_sub);
+        stage2_code.extend_from_slice(&zenith_sub);
 
         self.labels.insert(
-            "__xenith_cmp256".to_string(),
+            "__zenith_cmp256".to_string(),
             base_stage2 + (stage2_code.len() as isize),
         );
-        let xenith_cmp = vec![
+        let zenith_cmp = vec![
             0x60, 0x83, 0xEC, 0x20, 0x89, 0xE5, 0x8B, 0x07, 0x03, 0x46, 0x10, 0x89, 0x45, 0x00,
             0x8B, 0x47, 0x04, 0x13, 0x46, 0x14, 0x89, 0x45, 0x04, 0x8B, 0x47, 0x08, 0x13, 0x46,
             0x18, 0x89, 0x45, 0x08, 0x8B, 0x47, 0x0C, 0x13, 0x46, 0x1C, 0x89, 0x45, 0x0C, 0x0F,
@@ -1764,7 +1729,7 @@ impl Emitter {
             0x39, 0xD0, 0x75, 0x08, 0x8B, 0x45, 0x00, 0x8B, 0x55, 0x10, 0x39, 0xD0, 0x8D, 0x65,
             0x20, 0x61, 0xC3,
         ];
-        stage2_code.extend_from_slice(&xenith_cmp);
+        stage2_code.extend_from_slice(&zenith_cmp);
 
         self.labels.insert(
             "__hapi_init".to_string(),
@@ -2108,7 +2073,7 @@ impl Emitter {
             } else {
                 &mut stage1_code
             };
-            if let Expression::Identifier(nom) = &patch.cible {
+            if let Expression::Identifier(nom) = &patch.target {
                 let addr = self.labels.get(nom.as_str()).expect("Label manquant");
                 let dist = addr - (base + patch.offset as isize + patch.size as isize);
                 if patch.size == 4 {
@@ -2147,7 +2112,7 @@ impl Emitter {
             binaire_final.extend(self.segment_noun.clone());
 
             // On s'assure que le fichier total est un multiple de 512 pour le BIOS
-            while binaire_final.len() % 512 != 0 {
+            while !binaire_final.len().is_multiple_of(512) {
                 binaire_final.push(0);
             }
         } else {
