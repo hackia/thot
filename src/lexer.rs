@@ -1,3 +1,6 @@
+use std::iter::Peekable;
+use std::str::Chars;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Sacred Verbs (Instructions)
@@ -31,8 +34,6 @@ pub enum Token {
     OpenBracket,
     CloseBracket,
 }
-use std::iter::Peekable;
-use std::str::Chars;
 
 #[derive(Clone)]
 pub struct Lexer<'a> {
