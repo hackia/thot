@@ -211,6 +211,27 @@ impl Emitter {
         // Reste du bloc (16..32) = 0
         self.alloc_noun_object(NOUN_TYPE_DATA, &block, 0)
     }
+    pub fn sokh(&mut self, actual_code: &mut Vec<u8>, destination: &str) {
+        let dest_spec = parse_general_register(destination);
+        let dest_base = match dest_spec.kind {
+            RegKind::General(base) => base,
+            _ => unreachable!(),
+        };
+
+        if dest_spec.level <= Level::High {
+            self.emit_op32_prefix(actual_code); // Protection 32 bits
+            ensure_supported_level("sokh", destination, dest_spec.level);
+
+            // L'OpCode DEC registre commence à 0x48
+            let opcode = 0x48 + reg_code(dest_base);
+            actual_code.push(opcode);
+        } else {
+            panic!(
+                "For the moment, Sokh does not know how to reduce registers beyond High (32-bit): %{} ({})",
+                destination, dest_spec.level
+            );
+        }
+    }
 
     fn alloc_noun_object(&mut self, obj_type: u32, payload: &[u8], entrypoint: u32) -> u16 {
         let hash = blake3::hash(payload);
@@ -283,13 +304,14 @@ impl Emitter {
                     actual_code.extend_from_slice(&addr.to_le_bytes()); // MOV SI, addr
                     // Boucle en ligne 16 bits (BLINDÉE) :
                     actual_code.extend_from_slice(&[
-                        0xAC,             // LODSB
-                        0x08, 0xC0,       // OR AL, AL
-                        0x74, 0x09,       // JZ +9 (Si fin de chaîne, on saute le tout)
-                        0xB4, 0x0E,       // MOV AH, 0x0E
-                        0xBB, 0x0F, 0x00, // MOV BX, 0x000F (Garantit la page 0 et la couleur blanche)
-                        0xCD, 0x10,       // INT 0x10
-                        0xEB, 0xF2,       // JMP -14 (Retour direct au LODSB)
+                        0xAC, // LODSB
+                        0x08, 0xC0, // OR AL, AL
+                        0x74, 0x09, // JZ +9 (Si fin de chaîne, on saute le tout)
+                        0xB4, 0x0E, // MOV AH, 0x0E
+                        0xBB, 0x0F,
+                        0x00, // MOV BX, 0x000F (Garantit la page 0 et la couleur blanche)
+                        0xCD, 0x10, // INT 0x10
+                        0xEB, 0xF2, // JMP -14 (Retour direct au LODSB)
                     ]);
                 }
             }
@@ -603,15 +625,29 @@ impl Emitter {
     pub fn setjem(&mut self, actual_code: &mut Vec<u8>, destination: &str) {
         let dest_spec = parse_general_register(destination);
         ensure_supported_level("sedjem", destination, dest_spec.level);
+
         if let RegKind::General(RegBase::Ka) = dest_spec.kind {
             if dest_spec.level != Level::Base {
                 panic!("Sedjem only supports %ka (Base).");
             }
-            // Le Scribe du BIOS :
-            // Le BIOS met le CPU en pause, lit les impulsions électriques,
-            // les traduit en vrai code ASCII (A, B, C...) et place le résultat dans AL.
-            actual_code.extend_from_slice(&[0xB4, 0x00]); // MOV AH, 0x00 (Attendre une touche)
-            actual_code.extend_from_slice(&[0xCD, 0x16]); // INT 0x16 (Appel BIOS Clavier)
+
+            if self.protected_mode_enabled {
+                // --- MODE PROTÉGÉ (32-BIT) : Lecture directe des ports ---
+                // On boucle tant que le bit 0 du port 0x64 (Status Register) est à 0
+                // Cela signifie qu'aucune touche n'a été pressée.
+                actual_code.extend_from_slice(&[
+                    0xE4, 0x64, // IN AL, 0x64 (Lire le registre de statut)
+                    0xA8, 0x01, // TEST AL, 0x01 (Vérifier le bit "Output Buffer Full")
+                    0x74, 0xFA, // JZ -6 (Reboucler si le bit est à 0)
+                    0xE4, 0x60, // IN AL, 0x60 (Lire le code de la touche pressée !)
+                ]);
+            } else {
+                // --- MODE RÉEL (16-BIT) : Appel au Scribe du BIOS ---
+                actual_code.extend_from_slice(&[
+                    0xB4, 0x00, // MOV AH, 0x00
+                    0xCD, 0x16, // INT 0x16
+                ]);
+            }
         }
     }
     pub fn set_kbd_layout(&mut self, layout: String) -> &mut Self {
@@ -664,13 +700,8 @@ impl Emitter {
         self.emit_rel16_prefix(code_actual);
         code_actual.push(0x0F);
         code_actual.push(0x85);
-
         // On enregistre l'endroit à patcher EXACTEMENT comme pour ankh
         self.record_jump(code_actual, target);
-
-        // Placeholders (les zéros temporels)&
-        code_actual.push(0x00);
-        code_actual.push(0x00);
     }
     pub fn kheper(&mut self, code_actual: &mut Vec<u8>, source: &str, adresse: &Expression) {
         // 1. On identifie le code du registre source
@@ -1028,10 +1059,11 @@ impl Emitter {
                 b.push(0); // Signe du Silence
                 b
             }
+            Expression::Number(n) => n.to_le_bytes().to_vec(),
             _ => panic!("Type not supported in the Noun."),
         };
-        let adresse = self.alloc_noun_object(NOUN_TYPE_DATA, &contenu_brut, 0);
-        self.variables.insert(name.to_string(), adresse);
+        let address = self.alloc_noun_object(NOUN_TYPE_DATA, &contenu_brut, 0);
+        self.variables.insert(name.to_string(), address);
     }
     pub fn henek(&mut self, code: &mut Vec<u8>, destination: &str, value: &Expression) {
         let dest_spec = parse_register(destination);
@@ -1059,6 +1091,11 @@ impl Emitter {
                     self.emit_op32_prefix(code);
                     ensure_supported_level("henek", destination, dest_spec.level);
                     match value {
+                        Expression::Number(n) => {
+                            ensure_number_fits("henek", destination, dest_spec.level, *n);
+                            code.push(0xB8 + reg_code(dest_base));
+                            code.extend_from_slice(&n.to_le_bytes());
+                        }
                         Expression::Helix { ra, apophis } => {
                             ensure_helix_fits(
                                 "henek",
@@ -1108,6 +1145,7 @@ impl Emitter {
                             );
                             self.emit_mov_reg_reg(code, dest_base, src_base);
                         }
+
                         Expression::Helix { ra, apophis } => {
                             let addr = self.alloc_helix_literal(dest_spec.level, *ra, *apophis);
                             self.emit_mov_reg_imm32(code, dest_base, addr as u32);
@@ -1660,6 +1698,7 @@ impl Emitter {
                 Instruction::Smen { .. } => {}
                 Instruction::CurrentAddress => {}
                 Instruction::Dja { segment, target } => self.dja(actual_code, segment, &target),
+                Instruction::Sokh { destination } => self.sokh(actual_code, &destination),
             }
         } // Injection de la routine print dans le Stage 2 (pour ne pas saturer le Stage 1)
         // --- Injection UNIQUE de la routine print améliorée ---
@@ -2096,8 +2135,11 @@ impl Emitter {
             } else {
                 &mut stage1_code
             };
-            if let Expression::Identifier(nom) = &patch.target {
-                let addr = self.labels.get(nom.as_str()).expect("Label manquant");
+            if let Expression::Identifier(name) = &patch.target {
+                let addr = self
+                    .labels
+                    .get(name.as_str())
+                    .unwrap_or_else(|| panic!("Label missing : '{name}'"));
                 let dist = addr - (base + patch.offset as isize + patch.size as isize);
                 if patch.size == 4 {
                     let b = (dist as i32).to_le_bytes();
@@ -2107,7 +2149,7 @@ impl Emitter {
                     buffer[patch.offset + 3] = b[3];
                 } else {
                     if dist < i16::MIN as isize || dist > i16::MAX as isize {
-                        panic!("Jump out of range in real mode for label '{}'", nom);
+                        panic!("Jump out of range in real mode for label '{name}'");
                     }
                     let b = (dist as i16).to_le_bytes();
                     buffer[patch.offset] = b[0];

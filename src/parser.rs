@@ -171,6 +171,18 @@ impl<'a> Parser<'a> {
     // Analyse une instruction complète
     pub fn parse_instruction(&mut self) -> Instruction {
         match self.current_token() {
+            // Traduction de : sokh %registre
+            Token::Verb(v) if v == "sokh" => {
+                self.advance(); // Consomme 'sokh'
+
+                let destination = match &self.current_token {
+                    Token::Register(r) => r.clone(),
+                    _ => panic!("Syntax Error: 'sokh' requires a register as destination"),
+                };
+                let _ = parse_general_register(&destination);
+                self.advance(); // Consomme le registre
+                Instruction::Sokh { destination }
+            }
             Token::Verb(v)
                 if v == "neheh" || v == "ankh" || v == "isfet" || v == "jena" || v == "dja" =>
             {

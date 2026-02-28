@@ -269,6 +269,10 @@ pub enum Expression {
 // Les Instructions pures (La Loi)
 #[derive(Debug, Eq, Hash, Clone, PartialEq)]
 pub enum Instruction {
+    // sokh %registre (Décrémente de 1)
+    Sokh {
+        destination: String,
+    },
     CurrentAddress, // Le symbole $
     // nama mon_identifiant = valeur
     Nama {

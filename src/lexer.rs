@@ -135,10 +135,11 @@ impl<'a> Lexer<'a> {
                 let mut is_hex = false;
                 if c == '0'
                     && let Some(&next_char) = self.input.peek()
-                        && (next_char == 'x' || next_char == 'X') {
-                            is_hex = true;
-                            self.input.next(); // On mange le 'x'
-                        }
+                    && (next_char == 'x' || next_char == 'X')
+                {
+                    is_hex = true;
+                    self.input.next(); // On mange le 'x'
+                }
 
                 // 1. On lit la première force (Ra)
                 let mut ra_str = String::new();
@@ -165,27 +166,47 @@ impl<'a> Lexer<'a> {
                 if let Some(&':') = self.input.peek() {
                     self.input.next(); // On mange le ':'
 
-                    // On lit la seconde force (Apophis)
+                    // --- NOUVEAU CODE POUR APOPHIS (Gère l'hexadécimal) ---
                     let mut apo_str = String::new();
+                    let mut apo_is_hex = false;
+
+                    // Détection du préfixe 0x pour Apophis
+                    if let Some(&'0') = self.input.peek() {
+                        self.input.next(); // Mange le '0'
+                        if let Some(&'x') | Some(&'X') = self.input.peek() {
+                            self.input.next(); // Mange le 'x'
+                            apo_is_hex = true;
+                        } else {
+                            apo_str.push('0'); // C'était un zéro normal
+                        }
+                    }
+
                     while let Some(&next_char) = self.input.peek() {
-                        if next_char.is_ascii_digit() {
+                        if (apo_is_hex && next_char.is_ascii_hexdigit())
+                            || (!apo_is_hex && next_char.is_ascii_digit())
+                        {
                             apo_str.push(self.input.next().unwrap());
                         } else {
                             break;
                         }
                     }
+
                     let apophis_val = if !apo_str.is_empty() {
-                        apo_str.parse::<u16>().unwrap()
+                        if apo_is_hex {
+                            u16::from_str_radix(&apo_str, 16).unwrap()
+                        } else {
+                            apo_str.parse::<u16>().unwrap()
+                        }
                     } else {
                         0
                     };
 
                     Token::Helix(ra_val, apophis_val)
+                    // --- FIN DU NOUVEAU CODE ---
                 } else {
                     Token::Number(ra_val as i32)
                 }
             }
-
             // If it's a letter -> It's a Verb or an Identifier
             'a'..='z' | 'A'..='Z' | '_' => {
                 let mut word = c.to_string();
