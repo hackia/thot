@@ -10,7 +10,10 @@ use crate::elf::Sarcophagus;
 use crate::emitter::Emitter;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use clap::{Arg, ArgAction, Command, value_parser};
+use clap::{Arg, Command, value_parser};
+use crossterm::execute;
+use crossterm::style::{Print, Stylize};
+use crossterm::terminal::size;
 use std::fs;
 use std::path::Path;
 
@@ -19,35 +22,14 @@ fn cli() -> Command {
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
-        .arg(
-            Arg::new("file")
-                .action(ArgAction::Set)
-                .value_parser(value_parser!(String))
-                .required(true)
-                .index(1),
-        )
-        .arg(
-            Arg::new("output")
-                .required(true)
-                .index(2)
-                .action(ArgAction::Set),
-        )
+        .arg(Arg::new("maat").required(true))
+        .arg(Arg::new("output").required(true).index(2))
         .arg(
             Arg::new("boot")
-                .help("Generates a 512-byte raw disk image (Bootloader) instead of an ELF")
-                .action(ArgAction::Set)
+                .required(false)
+                .index(3)
                 .value_parser(value_parser!(bool))
-                .required(false)
-                .index(3),
-        )
-        .arg(
-            Arg::new("kbd")
-                .help("Defines the keyboard layout (eg: azerty, qwerty)")
-                .value_parser(value_parser!(String))
-                .required(false)
-                .default_value("qwerty")
-                .index(4)
-                .action(ArgAction::Set),
+                .default_value("false"),
         )
 }
 
@@ -57,7 +39,6 @@ pub fn tiss_tablet(
     dossier_courant: &Path,
 ) -> Vec<Instruction> {
     let mut instructions_finales = Vec::new();
-
     for instruction in instructions_brutes {
         match instruction {
             Instruction::Smen { .. } => instructions_finales.push(instruction),
@@ -67,7 +48,15 @@ pub fn tiss_tablet(
                 if chemin_complet.extension().is_none() {
                     chemin_complet.set_extension("maat");
                 }
-                // 2. On lit le parchemin
+
+                ok_tablet(
+                    chemin_complet
+                        .file_name()
+                        .expect("")
+                        .to_str()
+                        .expect("")
+                        .replace(".maat", ""),
+                );
                 let code_inclus = fs::read_to_string(&chemin_complet).unwrap_or_else(|_| {
                     panic!("The Scribe could not find the tablet: {:?}", chemin_complet)
                 });
@@ -95,59 +84,80 @@ pub fn tiss_tablet(
     instructions_finales
 }
 
+fn ok_tablet(tablet: String) {
+    let (w, _) = size().expect("Failed to get size");
+    let description = "Tablet has been compiled successfully";
+    let x = "* ".to_string();
+    let cr = " [ ".to_string();
+    let cl = " ] ".to_string();
+    let status = "ok".to_string();
+    let y = tablet.to_string();
+    let padding = w
+        - y.chars().count() as u16
+        - cr.chars().count() as u16
+        - cl.chars().count() as u16
+        - status.chars().count() as u16
+        - description.chars().count() as u16
+        - x.chars().count() as u16
+        - 5;
+    execute!(
+        std::io::stdout(),
+        Print(x.green().bold()),
+        Print(format!(
+            "The tablet {} has been compiled successfully",
+            y.green().bold()
+        )),
+        Print(" ".repeat(padding as usize)),
+        Print(cr.white().bold()),
+        Print(status.green().bold()),
+        Print(cl.white().bold()),
+        Print("\n")
+    )
+    .unwrap();
+}
+
 fn main() {
     let matches = cli().get_matches();
 
     // On utilise if let imbriqués (plus stable sur toutes les versions de Rust)
-    if let Some(file) = matches.get_one::<String>("file")
-        && let Some(o) = matches.get_one::<String>("output") {
-            let kbd_layout = matches
-                .get_one::<String>("kbd")
-                .expect("failed to get kbd")
-                .clone();
+    if let Some(file) = matches.get_one::<String>("maat")
+        && let Some(out) = matches.get_one::<String>("output")
+    {
+        let code_source = fs::read_to_string(file)
+            .expect("Erreur fatale : Le Scribe n'a pas pu lire le fichier source principal.");
 
-            // --- LA CORRECTION EST ICI ---
-            // 1. Le Scribe lit le parchemin principal
-            let code_source = fs::read_to_string(file)
-                .expect("Erreur fatale : Le Scribe n'a pas pu lire le fichier source principal.");
+        // 2. Les Yeux (Lexer) et l'Esprit (Parser) analysent le texte
+        let lexer = Lexer::new(&code_source);
+        let mut parser = Parser::new(lexer);
 
-            // 2. Les Yeux (Lexer) et l'Esprit (Parser) analysent le texte
-            let lexer = Lexer::new(&code_source);
-            let mut parser = Parser::new(lexer);
-
-            // 3. On remplit le vecteur avec les vraies instructions du fichier
-            let mut instructions = Vec::new();
-            while parser.not_eof() {
-                instructions.push(parser.parse_instruction());
-            }
-            // On récupère le dossier du fichier principal pour gérer les chemins relatifs
-            let chemin_fichier_principal = Path::new(file);
-            let dossier_principal = chemin_fichier_principal.parent().unwrap_or(Path::new(""));
-
-            // On aplatit l'arbre syntaxique en résolvant toutes les inclusions
-            let instructions_fusionnees = tiss_tablet(instructions, dossier_principal);
-
-            // 4. Émetteur (Le Marteau)
-            // On lui donne maintenant les instructions fusionnées, pures de tout 'dema'
-            let bin = Emitter::new()
-                .add_instruction(instructions_fusionnees.clone())
-                .set_kbd_layout(kbd_layout.clone())
-                .generer_binaire(matches.get_flag("boot"));
-
-            let binary = if matches.get_flag("boot") {
-                bin
-            } else {
-                Sarcophagus::packaging(&bin)
-            };
-            fs::write(o, binary).expect("Failed to write bin");
-
-            #[cfg(unix)]
-            {
-                if !matches.get_flag("boot") {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(o, fs::Permissions::from_mode(0o777))
-                        .expect("failed to set execute permissions");
-                }
-            }
+        // 3. On remplit le vecteur avec les vraies instructions du fichier
+        let mut instructions = Vec::new();
+        while parser.not_eof() {
+            instructions.push(parser.parse_instruction());
         }
+        // On récupère le dossier du fichier principal pour gérer les chemins relatifs
+        let chemin_fichier_principal = Path::new(file);
+        let dossier_principal = chemin_fichier_principal.parent().unwrap_or(Path::new(""));
+        // On aplatit l'arbre syntaxique en résolvant toutes les inclusions
+        let instructions_fusionnees = tiss_tablet(instructions, dossier_principal);
+
+        let bin = Emitter::new()
+            .add_instruction(instructions_fusionnees.clone())
+            .set_kbd_layout(String::from("qwerty"))
+            .generer_binaire(true);
+
+        let binary = if matches.get_flag("boot") {
+            bin
+        } else {
+            Sarcophagus::packaging(&bin)
+        };
+        fs::write(out, binary).expect("Failed to write bin");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(out, fs::Permissions::from_mode(0o755))
+                .expect("Failed to set permissions");
+        }
+        ok_tablet(file.replace(".maat", ""));
+    }
 }
