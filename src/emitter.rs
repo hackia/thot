@@ -7,7 +7,7 @@ use crate::register::{
 use std::collections::HashMap;
 const STAGE_ONE: isize = 0x7C00;
 const STAGE_TWO: isize = 0x7E00;
-const NOUN_BASE: u16 = 0x8000;
+const NOUN_BASE: u16 = 0xA000;
 const KERNEL_CURSOR_ADDR: u32 = 0x9000;
 const KERNEL_CUR_PLAN_ADDR: u32 = 0x9004;
 const HAPI_BITMAP_ADDR: u32 = 0x9008;
@@ -266,22 +266,32 @@ impl Emitter {
     pub fn per(&mut self, actual_code: &mut Vec<u8>, message: &Expression) {
         match message {
             Expression::StringLiteral(s) => {
-                // --- Code existant pour les phrases ---
                 let mut payload = s.as_bytes().to_vec();
-                payload.push(0);
+                payload.push(0); // Le Signe du Silence
                 let addr = self.alloc_noun_object(NOUN_TYPE_DATA, &payload, 0);
 
                 if self.protected_mode_enabled {
+                    // Mode Protégé : On passe par la routine 32 bits (std_print)
                     self.emit_mov_reg_imm32(actual_code, RegBase::Si, addr as u32);
+                    self.emit_rel16_prefix(actual_code);
+                    actual_code.push(0xE8);
+                    let target = Expression::Identifier("std_print".to_string());
+                    self.record_jump(actual_code, &target);
                 } else {
+                    // Mode Réel : On charge SI et on affiche via une boucle BIOS (INT 0x10) locale
                     actual_code.push(0xBE);
-                    actual_code.extend_from_slice(&addr.to_le_bytes());
+                    actual_code.extend_from_slice(&addr.to_le_bytes()); // MOV SI, addr
+                    // Boucle en ligne 16 bits (BLINDÉE) :
+                    actual_code.extend_from_slice(&[
+                        0xAC,             // LODSB
+                        0x08, 0xC0,       // OR AL, AL
+                        0x74, 0x09,       // JZ +9 (Si fin de chaîne, on saute le tout)
+                        0xB4, 0x0E,       // MOV AH, 0x0E
+                        0xBB, 0x0F, 0x00, // MOV BX, 0x000F (Garantit la page 0 et la couleur blanche)
+                        0xCD, 0x10,       // INT 0x10
+                        0xEB, 0xF2,       // JMP -14 (Retour direct au LODSB)
+                    ]);
                 }
-
-                self.emit_rel16_prefix(actual_code);
-                actual_code.push(0xE8);
-                let target = Expression::Identifier("std_print".to_string());
-                self.record_jump(actual_code, &target);
             }
             Expression::Register(r) => {
                 let spec = parse_general_register(r);
@@ -929,10 +939,10 @@ impl Emitter {
     }
     pub fn kherp(&mut self, code_actual: &mut Vec<u8>) {
         let setup_disque = vec![
-            0xB8, 0x08, 0x02, // AH=02 (Lecture), AL=08 (On lit 8 secteurs d'un coup !)
+            0xB8, 0x40, 0x02, // AH=02 (Lecture), AL=0x40 (On lit 64 secteurs = 32 Ko !)
             0xBB, 0x00, 0x7E, // Destination en RAM : 0x7E00
             0xB9, 0x02, 0x00, // Commencer au Secteur n°2 du disque
-            0xBA, 0x80, 0x00, // Disque dur n°0
+            0xB6, 0x00, // MOV DH, 0x00 (Tête 0, et on ne touche pas à DL !)
             0xCD, 0x13, // Appel BIOS
         ];
         code_actual.extend_from_slice(&setup_disque);
@@ -1343,6 +1353,19 @@ impl Emitter {
 
         // Le Stage 1 est à 0x7C00, le Stage 2 commence à 0x7E00 (juste après 512 octets)
         let base_stage1 = STAGE_ONE;
+        if is_bootloader {
+            stage1_code.extend_from_slice(&[
+                0xFA, // CLI : On suspend le temps (les interruptions matérielles)
+                0x31, 0xC0, // XOR AX, AX : AX = 0
+                0x8E,
+                0xD8, // MOV DS, AX : Data Segment = 0 (Pour que 'per' lise au bon endroit)
+                0x8E,
+                0xC0, // MOV ES, AX : Extra Segment = 0 (Pour que 'kherp' copie au bon endroit)
+                0x8E, 0xD0, // MOV SS, AX : Stack Segment = 0
+                0xBC, 0x00, 0x7C, // MOV SP, 0x7C00 : On place la pile en sécurité
+                0xFB, // STI : On relance le temps
+            ]);
+        }
         let base_stage2 = STAGE_TWO;
         let instructions = self.instructions.clone();
         for instruction in instructions {
@@ -2094,7 +2117,6 @@ impl Emitter {
         }
         // --- FUSION FINALE DES MONDES ---
         let mut binaire_final = stage1_code;
-
         if is_bootloader {
             // Mode OS (Bootloader) : Alignements stricts pour le matériel
             while binaire_final.len() < 510 {
@@ -2102,13 +2124,17 @@ impl Emitter {
             }
             binaire_final.extend_from_slice(&[0x55, 0xAA]); // Fin du Secteur 1
 
-            // On aligne le Stage 2 pour que le Noun commence au Secteur 3 (octet 1024)
-            let mut bloc_stage2 = stage2_code;
-            while bloc_stage2.len() < 512 {
-                bloc_stage2.push(0);
+            // On ajoute tout le code du Stage 2 (qui est très gros)
+            binaire_final.extend(stage2_code);
+
+            // --- LA GRANDE CORRECTION EST ICI ---
+            // 0xA000 (RAM) - 0x7C00 (Boot) = 0x2400 (soit 9216 octets d'écart)
+            // On remplit de vide jusqu'à atteindre l'endroit exact du Noun
+            while binaire_final.len() < 9216 {
+                binaire_final.push(0);
             }
 
-            binaire_final.extend(bloc_stage2);
+            // On peut maintenant coller les textes en toute sécurité
             binaire_final.extend(self.segment_noun.clone());
 
             // On s'assure que le fichier total est un multiple de 512 pour le BIOS
