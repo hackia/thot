@@ -37,6 +37,8 @@ fn cli() -> Command {
 pub fn tiss_tablet(
     instructions_brutes: Vec<Instruction>,
     dossier_courant: &Path,
+    m: &Path,
+    tablets: &mut Vec<String>,
 ) -> Vec<Instruction> {
     let mut instructions_finales = Vec::new();
     for instruction in instructions_brutes {
@@ -48,7 +50,14 @@ pub fn tiss_tablet(
                 if chemin_complet.extension().is_none() {
                     chemin_complet.set_extension("maat");
                 }
-
+                if chemin_complet == m {
+                    panic!("A tablet cannot include itself");
+                } else {
+                    if tablets.contains(&chemin_complet.to_str().expect("").to_string()) {
+                        panic!("A tablet cannot include itself");
+                    }
+                }
+                tablets.push(chemin_complet.to_str().unwrap().to_string());
                 ok_tablet(
                     chemin_complet
                         .file_name()
@@ -72,7 +81,8 @@ pub fn tiss_tablet(
 
                 // 4. RÉCURSION : On tisse ce nouveau fichier au cas où IL contienne aussi des 'dema' !
                 let dossier_parent = chemin_complet.parent().unwrap_or(Path::new(""));
-                let sous_instructions_tissees = tiss_tablet(sous_instructions, dossier_parent);
+                let sous_instructions_tissees =
+                    tiss_tablet(sous_instructions, dossier_parent, m, tablets);
 
                 // 5. On fusionne les instructions tissées dans notre ligne temporelle principale
                 instructions_finales.extend(sous_instructions_tissees);
@@ -118,6 +128,7 @@ fn ok_tablet(tablet: String) {
 
 fn main() {
     let matches = cli().get_matches();
+    let mut tablets = Vec::new();
 
     // On utilise if let imbriqués (plus stable sur toutes les versions de Rust)
     if let Some(file) = matches.get_one::<String>("maat")
@@ -139,7 +150,8 @@ fn main() {
         let chemin_fichier_principal = Path::new(file);
         let dossier_principal = chemin_fichier_principal.parent().unwrap_or(Path::new(""));
         // On aplatit l'arbre syntaxique en résolvant toutes les inclusions
-        let instructions_fusionnees = tiss_tablet(instructions, dossier_principal);
+        let instructions_fusionnees =
+            tiss_tablet(instructions, dossier_principal, Path::new(file.as_str()),&mut tablets);
 
         let bin = Emitter::new()
             .add_instruction(instructions_fusionnees.clone())
