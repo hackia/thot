@@ -309,10 +309,10 @@ impl Emitter {
                         ]);
                     }
                 } else {
-                    panic!("Le Scribe ne sait manifester que %ka pour le moment.");
+                    panic!("The Scribe only knows how to manifest %ka at the moment.");
                 }
             }
-            _ => panic!("Type de message inconnu pour le verbe 'per'."),
+            _ => panic!("Unknown message type for the verb 'per'."),
         }
     }
     pub fn mer(&mut self, actual_code: &mut Vec<u8>, destination: &str, value: &Expression) {
